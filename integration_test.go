@@ -1,0 +1,253 @@
+// Package airport provides integration tests for the Flight server using DuckDB.
+// These tests verify the server works correctly with the DuckDB Airport extension.
+package airport_test
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"net"
+	"testing"
+	"time"
+
+	"google.golang.org/grpc"
+
+	"github.com/apache/arrow/go/v18/arrow"
+	"github.com/apache/arrow/go/v18/arrow/array"
+	"github.com/apache/arrow/go/v18/arrow/memory"
+
+	"github.com/hugr-lab/airport-go"
+	"github.com/hugr-lab/airport-go/catalog"
+)
+
+// testServer wraps a Flight server for integration testing.
+type testServer struct {
+	grpcServer *grpc.Server
+	listener   net.Listener
+	address    string
+}
+
+// newTestServer creates and starts a test Flight server.
+func newTestServer(t *testing.T, cat catalog.Catalog, auth airport.Authenticator) *testServer {
+	t.Helper()
+
+	// Create listener on random port
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+
+	// Configure server
+	config := airport.ServerConfig{
+		Catalog: cat,
+		Auth:    auth,
+	}
+
+	opts := airport.ServerOptions(config)
+	grpcServer := grpc.NewServer(opts...)
+
+	if err := airport.NewServer(grpcServer, config); err != nil {
+		t.Fatalf("Failed to register server: %v", err)
+	}
+
+	// Start server in background
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	// Wait for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	return &testServer{
+		grpcServer: grpcServer,
+		listener:   lis,
+		address:    lis.Addr().String(),
+	}
+}
+
+// stop gracefully stops the test server.
+func (s *testServer) stop() {
+	s.grpcServer.GracefulStop()
+	s.listener.Close()
+}
+
+// openDuckDB opens a DuckDB connection with the Airport extension loaded.
+// Note: This requires DuckDB to be installed with the Airport extension.
+func openDuckDB(t *testing.T) *sql.DB {
+	t.Helper()
+
+	// Open in-memory DuckDB database
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Skipf("DuckDB not available: %v", err)
+	}
+
+	// Try to install and load Airport extension
+	// This will fail if DuckDB or Airport extension is not installed
+	_, err = db.Exec("INSTALL airport FROM community")
+	if err != nil {
+		t.Skipf("Airport extension not available: %v", err)
+	}
+
+	_, err = db.Exec("LOAD airport")
+	if err != nil {
+		t.Skipf("Failed to load Airport extension: %v", err)
+	}
+
+	return db
+}
+
+// connectToFlightServer attaches a Flight server to DuckDB.
+// Returns the attachment name for use in queries.
+func connectToFlightServer(t *testing.T, db *sql.DB, address string, token string) string {
+	t.Helper()
+
+	attachName := "test_flight"
+	query := fmt.Sprintf("ATTACH '%s' AS %s (TYPE airport", address, attachName)
+
+	if token != "" {
+		query += fmt.Sprintf(", token '%s'", token)
+	}
+
+	query += ")"
+
+	_, err := db.Exec(query)
+	if err != nil {
+		t.Fatalf("Failed to attach Flight server: %v", err)
+	}
+
+	return attachName
+}
+
+// simpleCatalog creates a basic catalog for testing.
+func simpleCatalog() catalog.Catalog {
+	// Add users table
+	usersSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+		{Name: "email", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	usersData := [][]interface{}{
+		{int64(1), "Alice", "alice@example.com"},
+		{int64(2), "Bob", "bob@example.com"},
+		{int64(3), "Charlie", "charlie@example.com"},
+	}
+
+	// Add products table
+	productsSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+		{Name: "price", Type: arrow.PrimitiveTypes.Float64},
+	}, nil)
+
+	productsData := [][]interface{}{
+		{int64(101), "Widget", 9.99},
+		{int64(102), "Gadget", 19.99},
+		{int64(103), "Doohickey", 29.99},
+	}
+
+	// Build catalog
+	cat, err := airport.NewCatalogBuilder().
+		Schema("main").
+		Comment("Main schema").
+		SimpleTable(airport.SimpleTableDef{
+			Name:     "users",
+			Comment:  "User accounts",
+			Schema:   usersSchema,
+			ScanFunc: makeScanFunc(usersSchema, usersData),
+		}).
+		SimpleTable(airport.SimpleTableDef{
+			Name:     "products",
+			Comment:  "Product catalog",
+			Schema:   productsSchema,
+			ScanFunc: makeScanFunc(productsSchema, productsData),
+		}).
+		Build()
+
+	if err != nil {
+		panic(fmt.Sprintf("Failed to build catalog: %v", err))
+	}
+
+	return cat
+}
+
+// authenticatedCatalog creates a catalog with authentication required.
+func authenticatedCatalog() catalog.Catalog {
+	// Add sensitive data table
+	secretsSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "key", Type: arrow.BinaryTypes.String},
+		{Name: "value", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	secretsData := [][]interface{}{
+		{"api_key", "secret123"},
+		{"db_password", "pass456"},
+	}
+
+	cat, err := airport.NewCatalogBuilder().
+		Schema("secure").
+		Comment("Secure schema").
+		SimpleTable(airport.SimpleTableDef{
+			Name:     "secrets",
+			Comment:  "Sensitive configuration",
+			Schema:   secretsSchema,
+			ScanFunc: makeScanFunc(secretsSchema, secretsData),
+		}).
+		Build()
+
+	if err != nil {
+		panic(fmt.Sprintf("Failed to build catalog: %v", err))
+	}
+
+	return cat
+}
+
+// testAuthHandler creates a simple bearer token auth handler for testing.
+func testAuthHandler() airport.Authenticator {
+	return airport.BearerAuth(func(token string) (string, error) {
+		validTokens := map[string]string{
+			"valid-token": "test-user",
+			"admin-token": "admin",
+		}
+
+		if identity, ok := validTokens[token]; ok {
+			return identity, nil
+		}
+
+		return "", airport.ErrUnauthorized
+	})
+}
+
+// buildTestRecord creates an Arrow record from test data.
+func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+
+	for _, row := range data {
+		for i, val := range row {
+			switch schema.Field(i).Type {
+			case arrow.PrimitiveTypes.Int64:
+				builder.Field(i).(*array.Int64Builder).Append(val.(int64))
+			case arrow.BinaryTypes.String:
+				builder.Field(i).(*array.StringBuilder).Append(val.(string))
+			case arrow.PrimitiveTypes.Float64:
+				builder.Field(i).(*array.Float64Builder).Append(val.(float64))
+			}
+		}
+	}
+
+	return builder.NewRecord()
+}
+
+// makeScanFunc creates a ScanFunc from in-memory data.
+func makeScanFunc(schema *arrow.Schema, data [][]interface{}) catalog.ScanFunc {
+	return func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+		record := buildTestRecord(schema, data)
+		defer record.Release()
+		return array.NewRecordReader(schema, []arrow.Record{record})
+	}
+}
