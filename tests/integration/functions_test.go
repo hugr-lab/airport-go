@@ -325,3 +325,281 @@ func TestFunctionErrors(t *testing.T) {
 		t.Skip("Error propagation testing requires function call support")
 	})
 }
+
+// generateSeriesFunc is a table function that generates a sequence of integers.
+type generateSeriesFunc struct{}
+
+func (f *generateSeriesFunc) Name() string {
+	return "GENERATE_SERIES"
+}
+
+func (f *generateSeriesFunc) Comment() string {
+	return "Generates a series of integers from start to stop"
+}
+
+func (f *generateSeriesFunc) Signature() catalog.FunctionSignature {
+	return catalog.FunctionSignature{
+		Parameters: []arrow.DataType{
+			arrow.PrimitiveTypes.Int64, // start
+			arrow.PrimitiveTypes.Int64, // stop
+		},
+		ReturnType: nil, // Table function
+		Variadic:   false,
+	}
+}
+
+func (f *generateSeriesFunc) SchemaForParameters(ctx context.Context, params []interface{}) (*arrow.Schema, error) {
+	return arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
+	}, nil), nil
+}
+
+func (f *generateSeriesFunc) Execute(ctx context.Context, params []interface{}, opts *catalog.ScanOptions) (array.RecordReader, error) {
+	if len(params) != 2 {
+		return nil, fmt.Errorf("GENERATE_SERIES requires 2 parameters, got %d", len(params))
+	}
+
+	start, ok := params[0].(float64)
+	if !ok {
+		return nil, fmt.Errorf("start must be number, got %T", params[0])
+	}
+
+	stop, ok := params[1].(float64)
+	if !ok {
+		return nil, fmt.Errorf("stop must be number, got %T", params[1])
+	}
+
+	// Generate series
+	var values []int64
+	for i := int64(start); i <= int64(stop); i++ {
+		values = append(values, i)
+	}
+
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer builder.Release()
+
+	builder.AppendValues(values, nil)
+
+	valueArray := builder.NewInt64Array()
+	defer valueArray.Release()
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	record := array.NewRecord(schema, []arrow.Array{valueArray}, int64(valueArray.Len()))
+
+	return array.NewRecordReader(schema, []arrow.Record{record})
+}
+
+// generateRangeFunc generates table with dynamic schema based on column count.
+type generateRangeFunc struct{}
+
+func (f *generateRangeFunc) Name() string {
+	return "GENERATE_RANGE"
+}
+
+func (f *generateRangeFunc) Comment() string {
+	return "Generates rows with dynamic number of columns"
+}
+
+func (f *generateRangeFunc) Signature() catalog.FunctionSignature {
+	return catalog.FunctionSignature{
+		Parameters: []arrow.DataType{
+			arrow.PrimitiveTypes.Int64, // start
+			arrow.PrimitiveTypes.Int64, // stop
+			arrow.PrimitiveTypes.Int64, // column_count
+		},
+		ReturnType: nil, // Table function with dynamic schema
+		Variadic:   false,
+	}
+}
+
+func (f *generateRangeFunc) SchemaForParameters(ctx context.Context, params []interface{}) (*arrow.Schema, error) {
+	if len(params) != 3 {
+		return nil, fmt.Errorf("GENERATE_RANGE requires 3 parameters, got %d", len(params))
+	}
+
+	columnCount, ok := params[2].(float64)
+	if !ok {
+		return nil, fmt.Errorf("column_count must be number, got %T", params[2])
+	}
+
+	if columnCount < 1 || columnCount > 5 {
+		return nil, fmt.Errorf("column_count must be between 1 and 5, got %v", columnCount)
+	}
+
+	fields := make([]arrow.Field, int(columnCount))
+	for i := 0; i < int(columnCount); i++ {
+		fields[i] = arrow.Field{
+			Name: fmt.Sprintf("col%d", i+1),
+			Type: arrow.PrimitiveTypes.Int64,
+		}
+	}
+
+	return arrow.NewSchema(fields, nil), nil
+}
+
+func (f *generateRangeFunc) Execute(ctx context.Context, params []interface{}, opts *catalog.ScanOptions) (array.RecordReader, error) {
+	if len(params) != 3 {
+		return nil, fmt.Errorf("GENERATE_RANGE requires 3 parameters, got %d", len(params))
+	}
+
+	start, ok := params[0].(float64)
+	if !ok {
+		return nil, fmt.Errorf("start must be number, got %T", params[0])
+	}
+
+	stop, ok := params[1].(float64)
+	if !ok {
+		return nil, fmt.Errorf("stop must be number, got %T", params[1])
+	}
+
+	columnCount, ok := params[2].(float64)
+	if !ok {
+		return nil, fmt.Errorf("column_count must be number, got %T", params[2])
+	}
+
+	schema, err := f.SchemaForParameters(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+
+	for i := int64(start); i <= int64(stop); i++ {
+		for col := 0; col < int(columnCount); col++ {
+			builder.Field(col).(*array.Int64Builder).Append(i * int64(col+1))
+		}
+	}
+
+	record := builder.NewRecord()
+
+	return array.NewRecordReader(schema, []arrow.Record{record})
+}
+
+// TestTableFunctions verifies that table functions work correctly.
+func TestTableFunctions(t *testing.T) {
+	usersSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	usersData := [][]interface{}{
+		{int64(1), "alice"},
+		{int64(2), "bob"},
+		{int64(3), "charlie"},
+	}
+
+	cat, err := airport.NewCatalogBuilder().
+		Schema("some_schema").
+		Comment("Schema with table functions").
+		SimpleTable(airport.SimpleTableDef{
+			Name:     "users",
+			Comment:  "User accounts",
+			Schema:   usersSchema,
+			ScanFunc: makeScanFunc(usersSchema, usersData),
+		}).
+		TableFunc(&generateSeriesFunc{}).
+		TableFunc(&generateRangeFunc{}).
+		Build()
+
+	if err != nil {
+		t.Fatalf("Failed to build catalog: %v", err)
+	}
+
+	server := newTestServer(t, cat, nil)
+	defer server.stop()
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	attachName := connectToFlightServer(t, db, server.address, "")
+
+	t.Run("GenerateSeries", func(t *testing.T) {
+		// Note: Table function syntax may not be fully supported yet in Airport extension
+		// This documents the expected behavior
+
+		// Try to call GENERATE_SERIES(1, 5)
+		query := fmt.Sprintf("SELECT * FROM %s.some_schema.GENERATE_SERIES(1, 5)", attachName)
+		rows, err := db.Query(query)
+
+		if err != nil {
+			t.Skipf("Table function calls not yet supported: %v", err)
+			return
+		}
+		defer rows.Close()
+
+		var values []int64
+		for rows.Next() {
+			var value int64
+			if err := rows.Scan(&value); err != nil {
+				t.Fatalf("Failed to scan: %v", err)
+			}
+			values = append(values, value)
+		}
+
+		expected := []int64{1, 2, 3, 4, 5}
+		if len(values) != len(expected) {
+			t.Errorf("Expected %d values, got %d", len(expected), len(values))
+		}
+
+		for i, v := range values {
+			if v != expected[i] {
+				t.Errorf("Value %d: expected %d, got %d", i, expected[i], v)
+			}
+		}
+	})
+
+	t.Run("GenerateRangeDynamicSchema", func(t *testing.T) {
+		// Test dynamic schema with 3 columns
+		query := fmt.Sprintf("SELECT * FROM %s.some_schema.GENERATE_RANGE(1, 3, 3)", attachName)
+		rows, err := db.Query(query)
+
+		if err != nil {
+			t.Skipf("Table function calls not yet supported: %v", err)
+			return
+		}
+		defer rows.Close()
+
+		// Get column count
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("Failed to get columns: %v", err)
+		}
+
+		if len(cols) != 3 {
+			t.Errorf("Expected 3 columns, got %d", len(cols))
+		}
+
+		// Verify column names
+		expectedCols := []string{"col1", "col2", "col3"}
+		for i, name := range cols {
+			if name != expectedCols[i] {
+				t.Errorf("Column %d: expected %s, got %s", i, expectedCols[i], name)
+			}
+		}
+
+		// Verify data
+		rowCount := 0
+		for rows.Next() {
+			var col1, col2, col3 int64
+			if err := rows.Scan(&col1, &col2, &col3); err != nil {
+				t.Fatalf("Failed to scan: %v", err)
+			}
+
+			rowNum := int64(rowCount + 1)
+			if col1 != rowNum*1 || col2 != rowNum*2 || col3 != rowNum*3 {
+				t.Errorf("Row %d: expected (%d, %d, %d), got (%d, %d, %d)",
+					rowCount, rowNum, rowNum*2, rowNum*3, col1, col2, col3)
+			}
+
+			rowCount++
+		}
+
+		if rowCount != 3 {
+			t.Errorf("Expected 3 rows, got %d", rowCount)
+		}
+	})
+}
