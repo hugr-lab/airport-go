@@ -18,13 +18,6 @@ openssl req -new -key server-key.pem -out server.csr \
   -subj "/CN=localhost"
 openssl x509 -req -days 365 -in server.csr -CA ca-cert.pem -CAkey ca-key.pem \
   -CAcreateserial -out server-cert.pem
-
-# Generate client certificate (for mutual TLS)
-openssl genrsa -out client-key.pem 4096
-openssl req -new -key client-key.pem -out client.csr \
-  -subj "/CN=client"
-openssl x509 -req -days 365 -in client.csr -CA ca-cert.pem -CAkey ca-key.pem \
-  -CAcreateserial -out client-cert.pem
 ```
 
 ## Running the Server
@@ -43,17 +36,14 @@ ATTACH 'grpc+tls://localhost:50051' AS secure_data (TYPE airport);
 SELECT * FROM secure_data.secure.messages;
 ```
 
-### Mutual TLS (mTLS)
+### TLS with Bearer Token Authentication
 
-If the server requires client certificates, configure DuckDB with credentials:
+If the server requires authentication, configure DuckDB with a bearer token:
 
 ```sql
 CREATE SECRET airport_tls (
     TYPE AIRPORT,
-    auth_token 'optional_bearer_token',
-    tls_cert_path 'client-cert.pem',
-    tls_key_path 'client-key.pem',
-    tls_ca_path 'ca-cert.pem',
+    auth_token 'your-bearer-token',
     scope 'grpc+tls://localhost:50051'
 );
 
@@ -63,6 +53,8 @@ ATTACH '' AS secure_data (
     LOCATION 'grpc+tls://localhost:50051'
 );
 ```
+
+Note: DuckDB Airport currently supports TLS for transport encryption only. Client certificate authentication (mTLS) is not yet supported in the Airport extension.
 
 ## Configuration Options
 
@@ -79,11 +71,15 @@ tlsConfig := &tls.Config{
 
 ### Client Authentication Modes
 
-- `tls.NoClientCert` - Server-only TLS (default)
+The server-side code supports various TLS client authentication modes:
+
+- `tls.NoClientCert` - Server-only TLS (default, recommended for DuckDB Airport)
 - `tls.RequestClientCert` - Request but don't verify client cert
 - `tls.RequireAnyClientCert` - Require client cert, any CA
 - `tls.VerifyClientCertIfGiven` - Verify if provided
 - `tls.RequireAndVerifyClientCert` - Mutual TLS (mTLS)
+
+Note: While the server supports mTLS, DuckDB Airport extension currently only supports TLS transport without client certificates. Use bearer token authentication if you need client authentication.
 
 ## Production Considerations
 

@@ -12,13 +12,12 @@ ATTACH 'grpc+tls://localhost:50051' AS secure_data (TYPE airport);
 -- Query the secure data
 SELECT * FROM secure_data.secure.messages;
 
--- Method 2: Using SECRET for authentication and/or client certificates
+-- Method 2: Using SECRET for bearer token authentication
+-- Note: DuckDB Airport currently supports TLS for transport only.
+-- Client certificates (mTLS) are not yet supported.
 CREATE OR REPLACE SECRET airport_tls_secret (
     TYPE AIRPORT,
-    auth_token 'your-bearer-token-here',  -- Optional bearer token
-    tls_cert_path 'client-cert.pem',      -- For mutual TLS
-    tls_key_path 'client-key.pem',        -- For mutual TLS
-    tls_ca_path 'ca-cert.pem',            -- CA certificate
+    auth_token 'your-bearer-token-here',
     scope 'grpc+tls://localhost:50051'
 );
 
