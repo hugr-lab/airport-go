@@ -170,7 +170,7 @@ func TestDynamicCatalog(t *testing.T) {
 
 	// Test 1: Initial schema is visible
 	t.Run("InitialSchema", func(t *testing.T) {
-		query := "SELECT schema_name FROM duckdb_schemas() WHERE catalog_name = ?"
+		query := "SELECT schema_name FROM duckdb_schemas() WHERE database_name = ?"
 		rows, err := db.Query(query, attachName)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -299,7 +299,7 @@ func TestDynamicTables(t *testing.T) {
 
 	// Test 1: No tables initially
 	t.Run("NoTables", func(t *testing.T) {
-		query := "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'dynamic' AND catalog_name = ?"
+		query := "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'dynamic' AND database_name = ?"
 		rows, err := db.Query(query, attachName)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)

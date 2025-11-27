@@ -1,0 +1,9 @@
+# Preparing repo for use
+
+1. Reorganize the repository structure:
+    - Move integration tests to the `tests/integration` directory.
+    - Remove unsued directories
+    - Set up a github actions workflow for CI with steps for linting, testing.
+    - Analyze the repo structure and if needed: optimize and reorganize submodules, update documentation.
+2. Add to all examples the DuckDB as a client, connect to the server, and run simple queries. Check the results.
+3. Invesigate the airport duckdb extension documentation and create a comprehensive spec to support the all they features, like DDL actions, endpoints, etc, as well as point of time parameters, DML operations for tables (insert, update, delete). The spec should include user stories and acceptance criteria for each feature. Place the spec in the `spec-features.md` file at the root of the repo.

@@ -32,6 +32,11 @@ type ServerConfig struct {
 	// OPTIONAL: If 0, uses gRPC default (4MB).
 	// Recommended: 16MB for large Arrow batches.
 	MaxMessageSize int
+
+	// Address is the server's public address (e.g., "localhost:50051").
+	// OPTIONAL: If empty, FlightEndpoint locations will not include URI.
+	// Required for proper DoGet routing when DuckDB needs to reconnect.
+	Address string
 }
 
 // Standard errors returned by airport package.

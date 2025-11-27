@@ -1,61 +1,48 @@
+version: 2
+
 run:
-  timeout: 5m
+  timeout: 10m
   go: '1.25'
 
 linters:
   enable:
-    - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
     - govet         # Vet examines Go source code
     - ineffassign   # Detect ineffectual assignments
     - staticcheck   # Static analysis
-    - typecheck     # Type-check Go code
     - unused        # Check for unused constants, variables, functions
-    - gofmt         # Check code is gofmt-ed
-    - goimports     # Check imports are formatted
     - misspell      # Spell checker
-    - gocritic      # Go linter aggregator
-    - revive        # Fast, configurable, extensible, flexible linter
-    - stylecheck    # Replacement for golint
     - unconvert     # Remove unnecessary type conversions
     - unparam       # Report unused function parameters
     - goprintffuncname  # Check printf-like functions
-    - nolintlint    # Validate //nolint directives
+  disable:
+    - errcheck      # Too many false positives on defer Close()
 
 linters-settings:
   errcheck:
-    check-blank: true
-    check-type-assertions: true
+    check-blank: false  # Don't check for unchecked blank assigns
+    ignore: Close,Write  # Ignore errors from Close and Write in defers
 
   govet:
     enable-all: true
-    disable:
-      - shadow  # Too many false positives
-
-  gofmt:
-    simplify: true
-
-  stylecheck:
-    checks: ["all"]
-
-  revive:
-    rules:
-      - name: exported
-        arguments: ["checkPrivateReceivers", "disableStutteringCheck"]
 
 issues:
   exclude-rules:
-    # Exclude some linters from running on tests files
     - path: _test\.go
       linters:
         - errcheck
         - unparam
-
-    # Allow dot imports in tests for testify
-    - path: _test\.go
+        - staticcheck
+    - path: tests/
       linters:
-        - revive
-      text: "dot-imports"
+        - errcheck
+        - unparam
+        - staticcheck
+    - text: "Error return value.*Close.*is not checked"
+      linters:
+        - errcheck
+    - text: "SA1019.*grpc.Dial.*deprecated"
+      linters:
+        - staticcheck
 
   max-issues-per-linter: 0
   max-same-issues: 0

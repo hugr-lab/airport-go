@@ -18,7 +18,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test 1: Simple SELECT query
 	t.Run("SimpleSelect", func(t *testing.T) {
-		query := "SELECT * FROM " + attachName + ".main.users ORDER BY id"
+		query := "SELECT * FROM " + attachName + ".some_schema.users ORDER BY id"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -50,7 +50,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test 2: Filtered query
 	t.Run("FilteredSelect", func(t *testing.T) {
-		query := "SELECT name FROM " + attachName + ".main.users WHERE id = 2"
+		query := "SELECT name FROM " + attachName + ".some_schema.users WHERE id = 2"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -73,7 +73,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test 3: Aggregation query
 	t.Run("Aggregation", func(t *testing.T) {
-		query := "SELECT COUNT(*) FROM " + attachName + ".main.products"
+		query := "SELECT COUNT(*) FROM " + attachName + ".some_schema.products"
 		var count int64
 		if err := db.QueryRow(query).Scan(&count); err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -89,8 +89,8 @@ func TestQueryExecution(t *testing.T) {
 		// Create a cross join (Cartesian product)
 		query := `
 			SELECT u.name, p.name
-			FROM ` + attachName + `.main.users u,
-			     ` + attachName + `.main.products p
+			FROM ` + attachName + `.some_schema.users u,
+			     ` + attachName + `.some_schema.products p
 			WHERE u.id = 1 AND p.id = 101
 		`
 		rows, err := db.Query(query)
@@ -115,7 +115,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test 5: ORDER BY
 	t.Run("OrderBy", func(t *testing.T) {
-		query := "SELECT name FROM " + attachName + ".main.users ORDER BY name DESC"
+		query := "SELECT name FROM " + attachName + ".some_schema.users ORDER BY name DESC"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -148,7 +148,7 @@ func TestQueryExecution(t *testing.T) {
 
 	// Test 6: LIMIT and OFFSET
 	t.Run("LimitOffset", func(t *testing.T) {
-		query := "SELECT name FROM " + attachName + ".main.users ORDER BY id LIMIT 1 OFFSET 1"
+		query := "SELECT name FROM " + attachName + ".some_schema.users ORDER BY id LIMIT 1 OFFSET 1"
 		var name string
 		if err := db.QueryRow(query).Scan(&name); err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -176,8 +176,8 @@ func TestComplexQueries(t *testing.T) {
 	t.Run("Subquery", func(t *testing.T) {
 		query := `
 			SELECT name
-			FROM ` + attachName + `.main.users
-			WHERE id IN (SELECT id FROM ` + attachName + `.main.users WHERE id > 1)
+			FROM ` + attachName + `.some_schema.users
+			WHERE id IN (SELECT id FROM ` + attachName + `.some_schema.users WHERE id > 1)
 			ORDER BY name
 		`
 		rows, err := db.Query(query)
@@ -211,7 +211,7 @@ func TestComplexQueries(t *testing.T) {
 					WHEN price < 25 THEN 'Medium'
 					ELSE 'Expensive'
 				END as price_category
-			FROM ` + attachName + `.main.products
+			FROM ` + attachName + `.some_schema.products
 			ORDER BY name
 		`
 		rows, err := db.Query(query)
@@ -246,7 +246,7 @@ func TestComplexQueries(t *testing.T) {
 				MIN(price) as min_price,
 				MAX(price) as max_price,
 				AVG(price) as avg_price
-			FROM ` + attachName + `.main.products
+			FROM ` + attachName + `.some_schema.products
 		`
 		var minPrice, maxPrice, avgPrice float64
 		if err := db.QueryRow(query).Scan(&minPrice, &maxPrice, &avgPrice); err != nil {
@@ -280,7 +280,7 @@ func TestDataTypes(t *testing.T) {
 
 	// Test integer type
 	t.Run("IntegerType", func(t *testing.T) {
-		query := "SELECT id FROM " + attachName + ".main.users WHERE id = 1"
+		query := "SELECT id FROM " + attachName + ".some_schema.users WHERE id = 1"
 		var id int64
 		if err := db.QueryRow(query).Scan(&id); err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -293,7 +293,7 @@ func TestDataTypes(t *testing.T) {
 
 	// Test string type
 	t.Run("StringType", func(t *testing.T) {
-		query := "SELECT name FROM " + attachName + ".main.users WHERE name LIKE 'Al%'"
+		query := "SELECT name FROM " + attachName + ".some_schema.users WHERE name LIKE 'Al%'"
 		var name string
 		if err := db.QueryRow(query).Scan(&name); err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -306,7 +306,7 @@ func TestDataTypes(t *testing.T) {
 
 	// Test float type
 	t.Run("FloatType", func(t *testing.T) {
-		query := "SELECT price FROM " + attachName + ".main.products WHERE id = 101"
+		query := "SELECT price FROM " + attachName + ".some_schema.products WHERE id = 101"
 		var price float64
 		if err := db.QueryRow(query).Scan(&price); err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -319,7 +319,7 @@ func TestDataTypes(t *testing.T) {
 
 	// Test string operations
 	t.Run("StringOperations", func(t *testing.T) {
-		query := "SELECT UPPER(name) FROM " + attachName + ".main.users WHERE id = 1"
+		query := "SELECT UPPER(name) FROM " + attachName + ".some_schema.users WHERE id = 1"
 		var upperName string
 		if err := db.QueryRow(query).Scan(&upperName); err != nil {
 			t.Fatalf("Query failed: %v", err)

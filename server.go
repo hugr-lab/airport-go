@@ -59,7 +59,7 @@ func NewServer(grpcServer *grpc.Server, config ServerConfig) error {
 	}
 
 	// Create Flight server
-	flightServer := flight.NewServer(config.Catalog, allocator, logger)
+	flightServer := flight.NewServer(config.Catalog, allocator, logger, config.Address)
 
 	// Register Flight service
 	flight.RegisterFlightServer(grpcServer, flightServer)
@@ -76,7 +76,7 @@ func NewServer(grpcServer *grpc.Server, config ServerConfig) error {
 // validateConfig checks that required ServerConfig fields are valid.
 func validateConfig(config ServerConfig) error {
 	if config.Catalog == nil {
-		return fmt.Errorf("Catalog is required")
+		return fmt.Errorf("catalog is required")
 	}
 	return nil
 }

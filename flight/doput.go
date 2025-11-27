@@ -2,6 +2,7 @@ package flight
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 
 	"github.com/apache/arrow/go/v18/arrow/flight"
@@ -72,10 +73,12 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 		return handleErr
 	}
 
-	// Send result back to client
-	if err := stream.Send(result); err != nil {
-		s.logger.Error("Failed to send PutResult", "error", err)
-		return status.Errorf(codes.Internal, "failed to send result: %v", err)
+	// Send result back to client (if not already sent by handler)
+	if result != nil {
+		if err := stream.Send(result); err != nil {
+			s.logger.Error("Failed to send PutResult", "error", err)
+			return status.Errorf(codes.Internal, "failed to send result: %v", err)
+		}
 	}
 
 	s.logger.Info("DoPut completed successfully")
@@ -84,7 +87,9 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 }
 
 // handleDoPutCommand processes CMD-type DoPut requests.
-// The command bytes typically contain MessagePack-encoded parameters.
+// The command bytes can contain either:
+// - MessagePack-encoded parameters for queries
+// - JSON-encoded DML operation descriptors (INSERT, UPDATE)
 func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.FlightDescriptor, msg *flight.FlightData, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	cmd := descriptor.GetCmd()
 	if len(cmd) == 0 {
@@ -93,7 +98,22 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 	s.logger.Info("Processing DoPut command", "cmd_size", len(cmd))
 
-	// Attempt to decode MessagePack parameters (T053 - parameter validation)
+	// Try to detect if this is a DML operation by checking for JSON structure
+	// DML descriptors have schema_name and table_name fields
+	var dmlCheck map[string]interface{}
+	if err := json.Unmarshal(cmd, &dmlCheck); err == nil {
+		// Successfully parsed as JSON - check if it's a DML operation
+		if operation, ok := dmlCheck["operation"].(string); ok {
+			switch operation {
+			case "insert":
+				return s.handleDoPutInsert(dmlCheck, stream)
+			case "update":
+				return s.handleDoPutUpdate(dmlCheck, stream)
+			}
+		}
+	}
+
+	// Not a DML operation - try MessagePack parameters (T053 - parameter validation)
 	params, err := msgpack.DecodeMap(cmd)
 	if err != nil {
 		s.logger.Error("Failed to decode MessagePack parameters",
@@ -233,4 +253,61 @@ func (r *flightDataReader) Read(p []byte) (n int, err error) {
 
 	n = copy(p, msg.DataBody)
 	return n, nil
+}
+
+// handleDoPutInsert processes INSERT operations via DoPut.
+// The descriptor map should contain schema_name and table_name.
+func (s *Server) handleDoPutInsert(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
+	// Parse descriptor
+	descriptorBytes, err := json.Marshal(descriptorMap)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
+	}
+
+	var descriptor InsertDescriptor
+	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid INSERT descriptor: %v", err)
+	}
+
+	s.logger.Info("Processing INSERT operation",
+		"schema", descriptor.SchemaName,
+		"table", descriptor.TableName,
+	)
+
+	// Call the DML handler - it sends the result internally
+	if err := s.handleInsert(&descriptor, stream); err != nil {
+		return nil, err
+	}
+
+	// Return nil to indicate result was already sent
+	return nil, nil
+}
+
+// handleDoPutUpdate processes UPDATE operations via DoPut.
+// The descriptor map should contain schema_name, table_name, and row_ids.
+func (s *Server) handleDoPutUpdate(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
+	// Parse descriptor
+	descriptorBytes, err := json.Marshal(descriptorMap)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
+	}
+
+	var descriptor UpdateDescriptor
+	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid UPDATE descriptor: %v", err)
+	}
+
+	s.logger.Info("Processing UPDATE operation",
+		"schema", descriptor.SchemaName,
+		"table", descriptor.TableName,
+		"row_count", len(descriptor.RowIds),
+	)
+
+	// Call the DML handler - it sends the result internally
+	if err := s.handleUpdate(&descriptor, stream); err != nil {
+		return nil, err
+	}
+
+	// Return nil to indicate result was already sent
+	return nil, nil
 }

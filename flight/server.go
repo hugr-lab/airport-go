@@ -19,15 +19,18 @@ type Server struct {
 	catalog   catalog.Catalog
 	allocator memory.Allocator
 	logger    *slog.Logger
+	address   string // Server's public address for FlightEndpoint locations
 }
 
 // NewServer creates a new Flight server with the given catalog and allocator.
 // The logger is used for internal logging of errors and important events.
-func NewServer(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Logger) *Server {
+// The address parameter specifies the server's public address for FlightEndpoint locations.
+func NewServer(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Logger, address string) *Server {
 	return &Server{
 		catalog:   cat,
 		allocator: allocator,
 		logger:    logger,
+		address:   address,
 	}
 }
 

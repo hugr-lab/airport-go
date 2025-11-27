@@ -132,7 +132,7 @@ func catalogWithFunctions() catalog.Catalog {
 	}
 
 	cat, err := airport.NewCatalogBuilder().
-		Schema("main").
+		Schema("some_schema").
 		Comment("Main schema with functions").
 		SimpleTable(airport.SimpleTableDef{
 			Name:     "users",
@@ -167,7 +167,7 @@ func TestScalarFunctions(t *testing.T) {
 	t.Run("DiscoverFunctions", func(t *testing.T) {
 		// DuckDB may expose functions through system tables
 		// This test documents expected behavior
-		query := "SELECT function_name FROM duckdb_functions() WHERE schema_name = 'main' AND function_type = 'scalar'"
+		query := "SELECT function_name FROM duckdb_functions() WHERE schema_name = 'some_schema' AND function_type = 'scalar'"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Skipf("Function discovery not supported: %v", err)
@@ -192,7 +192,7 @@ func TestScalarFunctions(t *testing.T) {
 		// This test documents the expected behavior for future support
 
 		// Try to use UPPERCASE function
-		query := "SELECT " + attachName + ".main.UPPERCASE(name) as upper_name FROM " + attachName + ".main.users WHERE id = 1"
+		query := "SELECT " + attachName + ".some_schema.UPPERCASE(name) as upper_name FROM " + attachName + ".some_schema.users WHERE id = 1"
 		var upperName string
 		err := db.QueryRow(query).Scan(&upperName)
 
@@ -299,7 +299,7 @@ func TestFunctionErrors(t *testing.T) {
 		testData := [][]interface{}{{int64(1)}}
 
 		cat, err := airport.NewCatalogBuilder().
-			Schema("main").
+			Schema("some_schema").
 			SimpleTable(airport.SimpleTableDef{
 				Name:     "test",
 				Schema:   usersSchema,

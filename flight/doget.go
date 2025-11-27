@@ -7,8 +7,6 @@ import (
 	"github.com/apache/arrow/go/v18/arrow/ipc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/hugr-lab/airport-go/catalog"
 )
 
 // DoGet streams Arrow record batches for a table query.
@@ -77,8 +75,21 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", ticketData.Schema, ticketData.Table)
 	}
 
+	// Convert ticket data to scan options (includes time-travel parameters)
+	scanOpts := ticketData.ToScanOptions()
+
+	// Log time-travel query if timestamp parameters present
+	if scanOpts.TimePoint != nil {
+		s.logger.Info("Point-in-time query",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"time_unit", scanOpts.TimePoint.Unit,
+			"time_value", scanOpts.TimePoint.Value,
+		)
+	}
+
 	// Call table's Scan function to get RecordReader
-	reader, err := table.Scan(ctx, &catalog.ScanOptions{})
+	reader, err := table.Scan(ctx, scanOpts)
 	if err != nil {
 		s.logger.Error("Table scan failed",
 			"schema", ticketData.Schema,

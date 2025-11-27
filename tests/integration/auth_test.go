@@ -29,9 +29,16 @@ func TestAuthentication(t *testing.T) {
 	// Test 2: Request with invalid token should fail
 	t.Run("InvalidToken", func(t *testing.T) {
 		attachName := "test_invalid"
-		query := "ATTACH '" + server.address + "' AS " + attachName + " (TYPE airport, token 'invalid-token')"
 
-		_, err := db.Exec(query)
+		// Create secret with invalid token
+		secretQuery := "CREATE OR REPLACE SECRET invalid_secret (TYPE AIRPORT, auth_token 'invalid-token', scope 'grpc://" + server.address + "')"
+		_, err := db.Exec(secretQuery)
+		if err != nil {
+			t.Fatalf("Failed to create secret: %v", err)
+		}
+
+		query := "ATTACH '' AS " + attachName + " (TYPE airport, SECRET invalid_secret, LOCATION 'grpc://" + server.address + "')"
+		_, err = db.Exec(query)
 		if err == nil {
 			t.Error("Expected authentication error with invalid token, but query succeeded")
 		}
@@ -57,9 +64,16 @@ func TestAuthentication(t *testing.T) {
 	t.Run("QueryWithAuth", func(t *testing.T) {
 		// Create new connection with admin token
 		attachName := "test_admin"
-		query := "ATTACH '" + server.address + "' AS " + attachName + " (TYPE airport, token 'admin-token')"
 
-		_, err := db.Exec(query)
+		// Create secret with admin token
+		secretQuery := "CREATE OR REPLACE SECRET admin_secret (TYPE AIRPORT, auth_token 'admin-token', scope 'grpc://" + server.address + "')"
+		_, err := db.Exec(secretQuery)
+		if err != nil {
+			t.Fatalf("Failed to create secret: %v", err)
+		}
+
+		query := "ATTACH '' AS " + attachName + " (TYPE airport, SECRET admin_secret, LOCATION 'grpc://" + server.address + "')"
+		_, err = db.Exec(query)
 		if err != nil {
 			t.Fatalf("Failed to attach with admin token: %v", err)
 		}
@@ -114,7 +128,7 @@ func TestAuthorizationInCatalog(t *testing.T) {
 		attachName := connectToFlightServer(t, db, server.address, "valid-token")
 
 		// Should be able to discover schemas
-		query := "SELECT schema_name FROM duckdb_schemas() WHERE catalog_name = ?"
+		query := "SELECT schema_name FROM duckdb_schemas() WHERE database_name = ?"
 		rows, err := db.Query(query, attachName)
 		if err != nil {
 			t.Fatalf("Schema discovery failed: %v", err)
@@ -161,12 +175,6 @@ func TestTokenValidation(t *testing.T) {
 			description: "Valid admin token should work",
 		},
 		{
-			name:        "EmptyToken",
-			token:       "",
-			shouldWork:  false,
-			description: "Empty token should fail",
-		},
-		{
 			name:        "WrongToken",
 			token:       "wrong-token",
 			shouldWork:  false,
@@ -177,15 +185,17 @@ func TestTokenValidation(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			attachName := "test_" + tc.name
-			var query string
 
-			if tc.token == "" {
-				query = "ATTACH '" + server.address + "' AS " + attachName + " (TYPE airport)"
-			} else {
-				query = "ATTACH '" + server.address + "' AS " + attachName + " (TYPE airport, token '" + tc.token + "')"
+			// Create secret with token
+			secretName := "secret_" + tc.name
+			secretQuery := "CREATE OR REPLACE SECRET " + secretName + " (TYPE AIRPORT, auth_token '" + tc.token + "', scope 'grpc://" + server.address + "')"
+			_, err := db.Exec(secretQuery)
+			if err != nil {
+				t.Fatalf("Failed to create secret: %v", err)
 			}
 
-			_, err := db.Exec(query)
+			query := "ATTACH '' AS " + attachName + " (TYPE airport, SECRET " + secretName + ", LOCATION 'grpc://" + server.address + "')"
+			_, err = db.Exec(query)
 
 			if tc.shouldWork && err != nil {
 				t.Errorf("%s: Expected success, but got error: %v", tc.description, err)

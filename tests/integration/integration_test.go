@@ -19,6 +19,8 @@ import (
 
 	"github.com/hugr-lab/airport-go"
 	"github.com/hugr-lab/airport-go/catalog"
+
+	_ "github.com/duckdb/duckdb-go/v2"
 )
 
 // testServer wraps a Flight server for integration testing.
@@ -42,6 +44,7 @@ func newTestServer(t *testing.T, cat catalog.Catalog, auth airport.Authenticator
 	config := airport.ServerConfig{
 		Catalog: cat,
 		Auth:    auth,
+		Address: lis.Addr().String(), // Pass server address for FlightEndpoint locations
 	}
 
 	opts := airport.ServerOptions(config)
@@ -82,19 +85,19 @@ func openDuckDB(t *testing.T) *sql.DB {
 	// Open in-memory DuckDB database
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
-		t.Skipf("DuckDB not available: %v", err)
+		t.Fatalf("DuckDB not available: %v", err)
 	}
 
 	// Try to install and load Airport extension
 	// This will fail if DuckDB or Airport extension is not installed
 	_, err = db.Exec("INSTALL airport FROM community")
 	if err != nil {
-		t.Skipf("Airport extension not available: %v", err)
+		t.Fatalf("Airport extension not available: %v", err)
 	}
 
 	_, err = db.Exec("LOAD airport")
 	if err != nil {
-		t.Skipf("Failed to load Airport extension: %v", err)
+		t.Fatalf("Failed to load Airport extension: %v", err)
 	}
 
 	return db
@@ -106,15 +109,26 @@ func connectToFlightServer(t *testing.T, db *sql.DB, address string, token strin
 	t.Helper()
 
 	attachName := "test_flight"
-	query := fmt.Sprintf("ATTACH '%s' AS %s (TYPE airport", address, attachName)
 
-	if token != "" {
-		query += fmt.Sprintf(", token '%s'", token)
+	// Create secret if token provided
+	if token == "" {
+		// Attach without auth
+		query := fmt.Sprintf("ATTACH '%s' AS %s (TYPE airport, LOCATION 'grpc://%s')", "", attachName, address)
+		_, err := db.Exec(query)
+		if err != nil {
+			t.Fatalf("Failed to attach Flight server: %v", err)
+		}
+		return attachName
+	}
+	secretQuery := fmt.Sprintf("CREATE OR REPLACE SECRET airport_test_secret (TYPE AIRPORT, auth_token '%s', scope 'grpc://%s')", token, address)
+	_, err := db.Exec(secretQuery)
+	if err != nil {
+		t.Fatalf("Failed to create secret: %v", err)
 	}
 
-	query += ")"
-
-	_, err := db.Exec(query)
+	// Attach with secret
+	query := fmt.Sprintf("ATTACH '%s' AS %s (TYPE airport, SECRET airport_test_secret, LOCATION 'grpc://%s')", "", attachName, address)
+	_, err = db.Exec(query)
 	if err != nil {
 		t.Fatalf("Failed to attach Flight server: %v", err)
 	}
@@ -152,8 +166,8 @@ func simpleCatalog() catalog.Catalog {
 
 	// Build catalog
 	cat, err := airport.NewCatalogBuilder().
-		Schema("main").
-		Comment("Main schema").
+		Schema("some_schema").
+		Comment("Test schema").
 		SimpleTable(airport.SimpleTableDef{
 			Name:     "users",
 			Comment:  "User accounts",
@@ -229,13 +243,43 @@ func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
 
 	for _, row := range data {
 		for i, val := range row {
-			switch schema.Field(i).Type {
-			case arrow.PrimitiveTypes.Int64:
+			field := schema.Field(i)
+			switch field.Type.ID() {
+			case arrow.BOOL:
+				builder.Field(i).(*array.BooleanBuilder).Append(val.(bool))
+			case arrow.INT8:
+				builder.Field(i).(*array.Int8Builder).Append(val.(int8))
+			case arrow.INT16:
+				builder.Field(i).(*array.Int16Builder).Append(val.(int16))
+			case arrow.INT32:
+				builder.Field(i).(*array.Int32Builder).Append(val.(int32))
+			case arrow.INT64:
 				builder.Field(i).(*array.Int64Builder).Append(val.(int64))
-			case arrow.BinaryTypes.String:
-				builder.Field(i).(*array.StringBuilder).Append(val.(string))
-			case arrow.PrimitiveTypes.Float64:
+			case arrow.UINT8:
+				builder.Field(i).(*array.Uint8Builder).Append(val.(uint8))
+			case arrow.UINT16:
+				builder.Field(i).(*array.Uint16Builder).Append(val.(uint16))
+			case arrow.UINT32:
+				builder.Field(i).(*array.Uint32Builder).Append(val.(uint32))
+			case arrow.UINT64:
+				builder.Field(i).(*array.Uint64Builder).Append(val.(uint64))
+			case arrow.FLOAT32:
+				builder.Field(i).(*array.Float32Builder).Append(val.(float32))
+			case arrow.FLOAT64:
 				builder.Field(i).(*array.Float64Builder).Append(val.(float64))
+			case arrow.STRING:
+				builder.Field(i).(*array.StringBuilder).Append(val.(string))
+			case arrow.BINARY:
+				builder.Field(i).(*array.BinaryBuilder).Append(val.([]byte))
+			case arrow.FIXED_SIZE_BINARY:
+				builder.Field(i).(*array.FixedSizeBinaryBuilder).Append(val.([]byte))
+			case arrow.DATE32:
+				builder.Field(i).(*array.Date32Builder).Append(arrow.Date32(val.(int32)))
+			case arrow.TIMESTAMP:
+				builder.Field(i).(*array.TimestampBuilder).Append(arrow.Timestamp(val.(int64)))
+			default:
+				// For unsupported types, skip or panic
+				panic("unsupported Arrow type in buildTestRecord: " + field.Type.String())
 			}
 		}
 	}
