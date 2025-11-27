@@ -382,8 +382,16 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		return "", "", fmt.Errorf("failed to get tables: %w", err)
 	}
 
-	// Create msgpack array of serialized FlightInfo (protobuf) for each table
-	flightInfoBytesArray := make([][]byte, 0, len(tables))
+	// Get all table functions in the schema
+	tableFunctions, err := schema.TableFunctions(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get table functions: %w", err)
+	}
+
+	// Create msgpack array of serialized FlightInfo (protobuf) for each table and function
+	flightInfoBytesArray := make([][]byte, 0, len(tables)+len(tableFunctions))
+
+	// Serialize tables
 	for _, table := range tables {
 		arrowSchema := table.ArrowSchema()
 		if arrowSchema == nil {
@@ -447,6 +455,83 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 
 		flightInfoBytesArray = append(flightInfoBytesArray, flightInfoBytes)
 	}
+
+	// Serialize table functions
+	for _, tableFunc := range tableFunctions {
+		// For table functions, we need to use a placeholder schema since the actual schema
+		// depends on parameters. Use an empty schema as a marker.
+		emptySchema := arrow.NewSchema([]arrow.Field{}, nil)
+
+		// Get function signature to determine if it takes table input
+		signature := tableFunc.Signature()
+
+		// Table functions that don't take table input should have nil input_schema
+		// This indicates they are parameter-based table functions (like generate_series)
+		var inputSchemaValue interface{}
+		inputSchemaValue = nil
+
+		// Create Flight app_metadata for table function
+		appMetadata := map[string]interface{}{
+			"type":         "table_function",
+			"schema":       schema.Name(),
+			"catalog":      "", // Empty catalog name
+			"name":         tableFunc.Name(),
+			"comment":      tableFunc.Comment(),
+			"input_schema": inputSchemaValue, // nil for parameter-based functions
+			"action_name":  nil,
+			"description":  tableFunc.Comment(),
+			"extra_data":   map[string]interface{}{
+				"parameter_count": len(signature.Parameters),
+				"variadic":        signature.Variadic,
+			},
+		}
+
+		appMetadataBytes, err := msgpack.Encode(appMetadata)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to encode table function app metadata: %w", err)
+		}
+
+		// Create FlightDescriptor for table function
+		descriptor := &flight.FlightDescriptor{
+			Type: flight.DescriptorPATH,
+			Path: []string{schema.Name(), tableFunc.Name()},
+		}
+
+		// For table functions, we don't create a ticket upfront since parameters are needed
+		// Instead, use empty ticket - DuckDB will call GetTableFunctionInfo when needed
+		emptyTicket := []byte("{}")
+
+		// Create FlightInfo with empty endpoint (schema determined at call time)
+		flightInfo := &flight.FlightInfo{
+			Schema:           flight.SerializeSchema(emptySchema, s.allocator),
+			FlightDescriptor: descriptor,
+			Endpoint: []*flight.FlightEndpoint{
+				{
+					Ticket: &flight.Ticket{
+						Ticket: emptyTicket,
+					},
+				},
+			},
+			TotalRecords: -1,
+			TotalBytes:   -1,
+			Ordered:      false,
+			AppMetadata:  appMetadataBytes,
+		}
+
+		// Serialize FlightInfo as protobuf
+		flightInfoBytes, err := proto.Marshal(flightInfo)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to marshal table function FlightInfo: %w", err)
+		}
+
+		flightInfoBytesArray = append(flightInfoBytesArray, flightInfoBytes)
+	}
+
+	s.logger.Info("Serialized schema contents",
+		"schema", schema.Name(),
+		"tables", len(tables),
+		"table_functions", len(tableFunctions),
+	)
 
 	// Serialize the array of FlightInfo bytes to msgpack
 	uncompressed, err := msgpack.Encode(flightInfoBytesArray)
