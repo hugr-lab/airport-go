@@ -57,7 +57,7 @@ func main() {
 	}
 
 	log.Printf("Airport Flight server (TLS) listening on %s", lis.Addr())
-	log.Printf("Connect with: ATTACH 'tls://localhost:50051' AS my_data (TYPE airport)")
+	log.Printf("Connect with: ATTACH 'grpc+tls://localhost:50051' AS my_data (TYPE airport)")
 
 	// Serve (blocks until shutdown)
 	if err := grpcServer.Serve(lis); err != nil {

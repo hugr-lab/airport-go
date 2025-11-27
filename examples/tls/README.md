@@ -39,7 +39,7 @@ go run main.go
 ### Basic TLS
 
 ```sql
-ATTACH 'tls://localhost:50051' AS secure_data (TYPE airport);
+ATTACH 'grpc+tls://localhost:50051' AS secure_data (TYPE airport);
 SELECT * FROM secure_data.secure.messages;
 ```
 
@@ -54,13 +54,13 @@ CREATE SECRET airport_tls (
     tls_cert_path 'client-cert.pem',
     tls_key_path 'client-key.pem',
     tls_ca_path 'ca-cert.pem',
-    scope 'tls://localhost:50051'
+    scope 'grpc+tls://localhost:50051'
 );
 
 ATTACH '' AS secure_data (
     TYPE airport,
     SECRET airport_tls,
-    LOCATION 'tls://localhost:50051'
+    LOCATION 'grpc+tls://localhost:50051'
 );
 ```
 
