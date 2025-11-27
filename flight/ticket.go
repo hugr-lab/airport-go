@@ -8,14 +8,24 @@ import (
 )
 
 // TicketData represents the decoded content of a Flight ticket.
-// Tickets are opaque byte slices encoding schema/table names for query routing,
-// plus optional time-travel parameters for point-in-time queries.
+// Tickets are opaque byte slices encoding schema/table/function names for query routing,
+// plus optional time-travel parameters for point-in-time queries and function parameters.
 type TicketData struct {
 	// Schema is the schema name (e.g., "main", "staging")
 	Schema string `json:"schema"`
 
 	// Table is the table name (e.g., "users", "orders")
-	Table string `json:"table"`
+	// Either Table or TableFunction must be set, but not both
+	Table string `json:"table,omitempty"`
+
+	// TableFunction is the table function name (e.g., "read_parquet")
+	// Either Table or TableFunction must be set, but not both
+	TableFunction string `json:"table_function,omitempty"`
+
+	// FunctionParams are the parameters for table function execution (optional)
+	// Only valid when TableFunction is set
+	// Parameters are serialized as JSON-compatible values
+	FunctionParams []interface{} `json:"function_params,omitempty"`
 
 	// Ts is Unix timestamp in seconds for point-in-time queries (optional)
 	// If both Ts and TsNs are nil, query returns current data
@@ -53,8 +63,8 @@ func EncodeTicket(schema, table string) ([]byte, error) {
 	return data, nil
 }
 
-// DecodeTicket parses an opaque ticket to extract schema and table names,
-// plus optional time-travel parameters.
+// DecodeTicket parses an opaque ticket to extract schema and table/function names,
+// plus optional time-travel parameters and function parameters.
 // Returns error if ticket is invalid or cannot be decoded.
 func DecodeTicket(ticketBytes []byte) (*TicketData, error) {
 	if len(ticketBytes) == 0 {
@@ -69,8 +79,18 @@ func DecodeTicket(ticketBytes []byte) (*TicketData, error) {
 	if ticket.Schema == "" {
 		return nil, fmt.Errorf("decoded ticket has empty schema name")
 	}
-	if ticket.Table == "" {
-		return nil, fmt.Errorf("decoded ticket has empty table name")
+
+	// Either Table or TableFunction must be set, but not both
+	if ticket.Table == "" && ticket.TableFunction == "" {
+		return nil, fmt.Errorf("ticket must have either table or table_function set")
+	}
+	if ticket.Table != "" && ticket.TableFunction != "" {
+		return nil, fmt.Errorf("ticket cannot have both table and table_function set")
+	}
+
+	// Function params only valid with table functions
+	if ticket.FunctionParams != nil && ticket.TableFunction == "" {
+		return nil, fmt.Errorf("function_params only valid with table_function")
 	}
 
 	// Validate timestamp parameters

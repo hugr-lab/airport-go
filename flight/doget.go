@@ -1,12 +1,18 @@
 package flight
 
 import (
+	"context"
+	"fmt"
 	"io"
 
+	"github.com/apache/arrow/go/v18/arrow"
+	"github.com/apache/arrow/go/v18/arrow/array"
 	"github.com/apache/arrow/go/v18/arrow/flight"
 	"github.com/apache/arrow/go/v18/arrow/ipc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/hugr-lab/airport-go/catalog"
 )
 
 // DoGet streams Arrow record batches for a table query.
@@ -36,6 +42,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	s.logger.Info("DoGet request",
 		"schema", ticketData.Schema,
 		"table", ticketData.Table,
+		"table_function", ticketData.TableFunction,
 	)
 
 	// Look up schema in catalog
@@ -51,72 +58,28 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		return status.Errorf(codes.NotFound, "schema not found: %s", ticketData.Schema)
 	}
 
-	// Look up table in schema
-	table, err := schema.Table(ctx, ticketData.Table)
-	if err != nil {
-		s.logger.Error("Failed to get table from schema",
-			"schema", ticketData.Schema,
-			"table", ticketData.Table,
-			"error", err,
-		)
-		return status.Errorf(codes.Internal, "failed to get table: %v", err)
-	}
-	if table == nil {
-		return status.Errorf(codes.NotFound, "table not found: %s.%s", ticketData.Schema, ticketData.Table)
-	}
+	// Branch based on whether this is a table or table function call
+	var reader array.RecordReader
+	var readerSchema *arrow.Schema
 
-	// Get table's Arrow schema for validation
-	tableSchema := table.ArrowSchema()
-	if tableSchema == nil {
-		s.logger.Error("Table returned nil Arrow schema",
-			"schema", ticketData.Schema,
-			"table", ticketData.Table,
-		)
-		return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", ticketData.Schema, ticketData.Table)
-	}
-
-	// Convert ticket data to scan options (includes time-travel parameters)
-	scanOpts := ticketData.ToScanOptions()
-
-	// Log time-travel query if timestamp parameters present
-	if scanOpts.TimePoint != nil {
-		s.logger.Info("Point-in-time query",
-			"schema", ticketData.Schema,
-			"table", ticketData.Table,
-			"time_unit", scanOpts.TimePoint.Unit,
-			"time_value", scanOpts.TimePoint.Value,
-		)
-	}
-
-	// Call table's Scan function to get RecordReader
-	reader, err := table.Scan(ctx, scanOpts)
-	if err != nil {
-		s.logger.Error("Table scan failed",
-			"schema", ticketData.Schema,
-			"table", ticketData.Table,
-			"error", err,
-		)
-		return status.Errorf(codes.Internal, "table scan failed: %v", err)
+	if ticketData.TableFunction != "" {
+		// Handle table function execution
+		reader, readerSchema, err = s.executeTableFunction(ctx, schema, ticketData)
+		if err != nil {
+			return err // Error already formatted
+		}
+	} else {
+		// Handle regular table scan
+		reader, readerSchema, err = s.executeTableScan(ctx, schema, ticketData)
+		if err != nil {
+			return err // Error already formatted
+		}
 	}
 	defer reader.Release()
 
-	// Validate RecordReader schema matches table schema (T031)
-	readerSchema := reader.Schema()
-	if !tableSchema.Equal(readerSchema) {
-		s.logger.Error("RecordReader schema does not match table schema",
-			"schema", ticketData.Schema,
-			"table", ticketData.Table,
-			"table_schema_fields", tableSchema.NumFields(),
-			"reader_schema_fields", readerSchema.NumFields(),
-		)
-		return status.Errorf(codes.Internal,
-			"schema mismatch: table has %d fields, reader has %d fields",
-			tableSchema.NumFields(), readerSchema.NumFields())
-	}
-
 	s.logger.Info("Starting record streaming",
 		"schema", ticketData.Schema,
-		"table", ticketData.Table,
+		"target", fmt.Sprintf("%s%s", ticketData.Table, ticketData.TableFunction),
 		"num_fields", readerSchema.NumFields(),
 	)
 
@@ -195,4 +158,153 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	)
 
 	return nil
+}
+
+// executeTableScan handles regular table scan operations.
+func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ticketData *TicketData) (array.RecordReader, *arrow.Schema, error) {
+	// Look up table in schema
+	table, err := schema.Table(ctx, ticketData.Table)
+	if err != nil {
+		s.logger.Error("Failed to get table from schema",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"error", err,
+		)
+		return nil, nil, status.Errorf(codes.Internal, "failed to get table: %v", err)
+	}
+	if table == nil {
+		return nil, nil, status.Errorf(codes.NotFound, "table not found: %s.%s", ticketData.Schema, ticketData.Table)
+	}
+
+	// Get table's Arrow schema for validation
+	tableSchema := table.ArrowSchema()
+	if tableSchema == nil {
+		s.logger.Error("Table returned nil Arrow schema",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+		)
+		return nil, nil, status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", ticketData.Schema, ticketData.Table)
+	}
+
+	// Convert ticket data to scan options (includes time-travel parameters)
+	scanOpts := ticketData.ToScanOptions()
+
+	// Log time-travel query if timestamp parameters present
+	if scanOpts.TimePoint != nil {
+		s.logger.Info("Point-in-time query",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"time_unit", scanOpts.TimePoint.Unit,
+			"time_value", scanOpts.TimePoint.Value,
+		)
+	}
+
+	// Call table's Scan function to get RecordReader
+	reader, err := table.Scan(ctx, scanOpts)
+	if err != nil {
+		s.logger.Error("Table scan failed",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"error", err,
+		)
+		return nil, nil, status.Errorf(codes.Internal, "table scan failed: %v", err)
+	}
+
+	// Validate RecordReader schema matches table schema
+	readerSchema := reader.Schema()
+	if !tableSchema.Equal(readerSchema) {
+		reader.Release()
+		s.logger.Error("RecordReader schema does not match table schema",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"table_schema_fields", tableSchema.NumFields(),
+			"reader_schema_fields", readerSchema.NumFields(),
+		)
+		return nil, nil, status.Errorf(codes.Internal,
+			"schema mismatch: table has %d fields, reader has %d fields",
+			tableSchema.NumFields(), readerSchema.NumFields())
+	}
+
+	return reader, readerSchema, nil
+}
+
+// executeTableFunction handles table function execution with dynamic schemas.
+func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema, ticketData *TicketData) (array.RecordReader, *arrow.Schema, error) {
+	// Get table functions from schema
+	functions, err := schema.TableFunctions(ctx)
+	if err != nil {
+		s.logger.Error("Failed to get table functions",
+			"schema", ticketData.Schema,
+			"error", err,
+		)
+		return nil, nil, status.Errorf(codes.Internal, "failed to get table functions: %v", err)
+	}
+
+	// Find the requested function
+	var targetFunc catalog.TableFunction
+	for _, fn := range functions {
+		if fn.Name() == ticketData.TableFunction {
+			targetFunc = fn
+			break
+		}
+	}
+
+	if targetFunc == nil {
+		return nil, nil, status.Errorf(codes.NotFound, "table function not found: %s.%s",
+			ticketData.Schema, ticketData.TableFunction)
+	}
+
+	s.logger.Info("Executing table function",
+		"schema", ticketData.Schema,
+		"function", ticketData.TableFunction,
+		"param_count", len(ticketData.FunctionParams),
+	)
+
+	// Get the schema for these parameters (dynamic schema based on params)
+	funcSchema, err := targetFunc.SchemaForParameters(ctx, ticketData.FunctionParams)
+	if err != nil {
+		s.logger.Error("Failed to get function schema",
+			"schema", ticketData.Schema,
+			"function", ticketData.TableFunction,
+			"error", err,
+		)
+		return nil, nil, status.Errorf(codes.Internal, "failed to get function schema: %v", err)
+	}
+
+	s.logger.Info("Table function schema determined",
+		"schema", ticketData.Schema,
+		"function", ticketData.TableFunction,
+		"output_fields", funcSchema.NumFields(),
+	)
+
+	// Convert ticket data to scan options
+	scanOpts := ticketData.ToScanOptions()
+
+	// Execute the table function
+	reader, err := targetFunc.Execute(ctx, ticketData.FunctionParams, scanOpts)
+	if err != nil {
+		s.logger.Error("Table function execution failed",
+			"schema", ticketData.Schema,
+			"function", ticketData.TableFunction,
+			"error", err,
+		)
+		return nil, nil, status.Errorf(codes.Internal, "table function execution failed: %v", err)
+	}
+
+	// Validate reader schema matches function's declared schema
+	readerSchema := reader.Schema()
+	if !funcSchema.Equal(readerSchema) {
+		reader.Release()
+		s.logger.Error("RecordReader schema does not match function schema",
+			"schema", ticketData.Schema,
+			"function", ticketData.TableFunction,
+			"function_schema_fields", funcSchema.NumFields(),
+			"reader_schema_fields", readerSchema.NumFields(),
+		)
+		return nil, nil, status.Errorf(codes.Internal,
+			"schema mismatch: function declared %d fields, reader has %d fields",
+			funcSchema.NumFields(), readerSchema.NumFields())
+	}
+
+	return reader, readerSchema, nil
 }

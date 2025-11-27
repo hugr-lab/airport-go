@@ -67,16 +67,20 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 	}
 }
 
-// executeScalarFunction executes a scalar function on input Arrow data.
+// executeScalarFunction validates scalar function existence and signature.
+// For now, scalar functions are primarily for catalog discovery.
+// Full execution support via DuckDB will be implemented when Airport extension adds support.
+//
 // Request format (MessagePack):
 //
 //	{
 //	  "schema": "main",
-//	  "function": "UPPERCASE",
-//	  "input_data": <Arrow IPC bytes>
+//	  "function": "UPPERCASE"
 //	}
+//
+// Response format: Function signature and metadata
 func (s *Server) executeScalarFunction(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
-	// Decode MessagePack parameters (T058 - signature validation)
+	// Decode MessagePack parameters
 	var params struct {
 		Schema   string `msgpack:"schema"`
 		Function string `msgpack:"function"`
@@ -87,7 +91,7 @@ func (s *Server) executeScalarFunction(ctx context.Context, action *flight.Actio
 		return status.Errorf(codes.InvalidArgument, "invalid parameters: %v", err)
 	}
 
-	s.logger.Info("Executing scalar function",
+	s.logger.Info("Scalar function discovery",
 		"schema", params.Schema,
 		"function", params.Function,
 	)
@@ -120,20 +124,18 @@ func (s *Server) executeScalarFunction(ctx context.Context, action *flight.Actio
 		return status.Errorf(codes.NotFound, "function not found: %s", params.Function)
 	}
 
+	// Get function signature
+	signature := targetFunc.Signature()
+
 	s.logger.Info("Found scalar function",
 		"name", targetFunc.Name(),
 		"comment", targetFunc.Comment(),
+		"param_count", len(signature.Parameters),
 	)
 
-	// For now, return success result
-	// In a full implementation, would:
-	// 1. Receive Arrow input data from client
-	// 2. Validate input schema matches function signature
-	// 3. Execute function vectorized (T059)
-	// 4. Stream result batches back (T060)
-
+	// Return function metadata
 	result := &flight.Result{
-		Body: []byte(fmt.Sprintf("Function %s executed successfully", params.Function)),
+		Body: []byte(fmt.Sprintf("Scalar function %s found with %d parameters", targetFunc.Name(), len(signature.Parameters))),
 	}
 
 	if err := stream.Send(result); err != nil {
