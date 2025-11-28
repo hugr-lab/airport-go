@@ -446,8 +446,6 @@ func timeTravelCatalog() catalog.Catalog {
 
 // TestTimeTravelQueries tests time travel functionality with AT syntax.
 func TestTimeTravelQueries(t *testing.T) {
-	//t.Skip("DuckDB Airport extension does not yet support SQL-level time travel syntax (AT TIMESTAMP)")
-
 	cat := timeTravelCatalog()
 	server := newTestServer(t, cat, nil)
 	defer server.stop()
@@ -457,12 +455,31 @@ func TestTimeTravelQueries(t *testing.T) {
 
 	attachName := connectToFlightServer(t, db, server.address, "")
 
+	// Test 0: Query without time travel first (should work)
+	t.Run("QueryCurrent", func(t *testing.T) {
+		query := "SELECT id, name, email FROM " + attachName + ".versioned_schema.versioned_users ORDER BY id LIMIT 1"
+		rows, err := db.Query(query)
+		if err != nil {
+			t.Fatalf("Basic query failed: %v", err)
+		}
+		defer rows.Close()
+
+		if rows.Next() {
+			var id int64
+			var name, email string
+			if err := rows.Scan(&id, &name, &email); err != nil {
+				t.Fatalf("Failed to scan: %v", err)
+			}
+			t.Logf("Current data: id=%d, name=%s, email=%s", id, name, email)
+		}
+	})
+
 	// Test 1: Query at time point 1 (old schema without phone, 3 users)
 	t.Run("QueryAtTime1_OldSchema", func(t *testing.T) {
 		// 2024-01-01 00:00:00 UTC = 1704067200 seconds
-		// Note: DuckDB Airport extension handles time travel at protocol level,
-		// not via SQL syntax yet
-		query := "SELECT * FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-01-01 00:00:00') ORDER BY id"
+		// Note: DuckDB Airport extension has a bug with SELECT * and AT syntax
+		// Workaround: explicitly list columns instead of using *
+		query := "SELECT id, name, email FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => '2024-01-01 00:00:00') ORDER BY id"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -513,7 +530,8 @@ func TestTimeTravelQueries(t *testing.T) {
 	// Test 2: Query at time point 2 (new schema with phone, 4 users)
 	t.Run("QueryAtTime2_NewSchema", func(t *testing.T) {
 		// 2024-06-01 00:00:00 UTC = 1717200000 seconds
-		query := "SELECT * FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-06-01 00:00:00' ORDER BY id"
+		// Explicitly list columns to avoid DuckDB bug with SELECT * and AT
+		query := "SELECT id, name, email, phone FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-06-01 00:00:00') ORDER BY id"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -605,13 +623,13 @@ func TestTimeTravelQueries(t *testing.T) {
 	// Test 4: Verify schema evolution - compare data across time points
 	t.Run("CompareDataAcrossTimePoints", func(t *testing.T) {
 		// Query Bob's email at both time points
-		query1 := "SELECT email FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-01-01 00:00:00' WHERE id = 2"
+		query1 := "SELECT email FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-01-01 00:00:00') WHERE id = 2"
 		var email1 string
 		if err := db.QueryRow(query1).Scan(&email1); err != nil {
 			t.Fatalf("Query1 failed: %v", err)
 		}
 
-		query2 := "SELECT email FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-06-01 00:00:00' WHERE id = 2"
+		query2 := "SELECT email FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-06-01 00:00:00') WHERE id = 2"
 		var email2 string
 		if err := db.QueryRow(query2).Scan(&email2); err != nil {
 			t.Fatalf("Query2 failed: %v", err)
@@ -629,7 +647,7 @@ func TestTimeTravelQueries(t *testing.T) {
 	// Test 5: Query phone column only available in newer schema
 	t.Run("QueryNewColumnAtDifferentTimes", func(t *testing.T) {
 		// At time1, phone column doesn't exist - query should fail or return error
-		query1 := "SELECT phone FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-01-01 00:00:00' WHERE id = 1"
+		query1 := "SELECT phone FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-01-01 00:00:00') WHERE id = 1"
 		var phone1 string
 		err := db.QueryRow(query1).Scan(&phone1)
 		if err == nil {
@@ -637,7 +655,7 @@ func TestTimeTravelQueries(t *testing.T) {
 		}
 
 		// At time2, phone column exists
-		query2 := "SELECT phone FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-06-01 00:00:00' WHERE id = 1"
+		query2 := "SELECT phone FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-06-01 00:00:00') WHERE id = 1"
 		var phone2 string
 		if err := db.QueryRow(query2).Scan(&phone2); err != nil {
 			t.Fatalf("Query2 failed: %v", err)
@@ -651,14 +669,14 @@ func TestTimeTravelQueries(t *testing.T) {
 	// Test 6: Count users at different time points
 	t.Run("CountUsersAcrossTime", func(t *testing.T) {
 		// Count at time1 (should be 3)
-		query1 := "SELECT COUNT(*) FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-01-01 00:00:00'"
+		query1 := "SELECT COUNT(id) FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-01-01 00:00:00')"
 		var count1 int64
 		if err := db.QueryRow(query1).Scan(&count1); err != nil {
 			t.Fatalf("Query1 failed: %v", err)
 		}
 
 		// Count at time2 (should be 4)
-		query2 := "SELECT COUNT(*) FROM " + attachName + ".versioned_schema.versioned_users AT TIMESTAMP '2024-06-01 00:00:00'"
+		query2 := "SELECT COUNT(id) FROM " + attachName + ".versioned_schema.versioned_users AT (TIMESTAMP => TIMESTAMP '2024-06-01 00:00:00')"
 		var count2 int64
 		if err := db.QueryRow(query2).Scan(&count2); err != nil {
 			t.Fatalf("Query2 failed: %v", err)
