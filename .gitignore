@@ -28,7 +28,7 @@ coverage.html
 vendor/
 
 # Go mod cache
-go.sum
+#go.sum
 
 # IDE and editor files
 .vscode/
