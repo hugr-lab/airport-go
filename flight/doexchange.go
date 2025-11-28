@@ -1,7 +1,6 @@
 package flight
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hugr-lab/airport-go/catalog"
-	"github.com/hugr-lab/airport-go/internal/msgpack"
 )
 
 // DoExchange implements bidirectional streaming for function execution.
@@ -385,102 +383,8 @@ func (s *Server) handleTableFunction(ctx context.Context, stream flight.FlightSe
 		"first_bytes", fmt.Sprintf("%x", paramMsg.AppMetadata[:min(20, len(paramMsg.AppMetadata))]),
 	)
 
-	// The app_metadata contains msgpack-encoded parameters
-	var params []any
-	if len(paramMsg.AppMetadata) > 0 {
-		// First decode as a generic map to see structure
-		var paramMap map[string]interface{}
-		if err := msgpack.Decode(paramMsg.AppMetadata, &paramMap); err != nil {
-			s.logger.Warn("Failed to decode parameters as map",
-				"error", err,
-				"metadata_len", len(paramMsg.AppMetadata),
-			)
-			params = []any{}
-		} else {
-			// Log map keys for debugging
-			mapKeys := make([]string, 0, len(paramMap))
-			for k := range paramMap {
-				mapKeys = append(mapKeys, k)
-			}
-			s.logger.Debug("Decoded parameter map",
-				"keys", mapKeys,
-			)
-
-			// Extract the parameters array
-			if paramsVal, ok := paramMap["parameters"]; ok {
-				s.logger.Debug("Parameters field found",
-					"type", fmt.Sprintf("%T", paramsVal),
-					"value_len", len(fmt.Sprintf("%v", paramsVal)),
-				)
-
-				// The parameters might be base64-encoded or raw bytes
-				if paramsBytes, ok := paramsVal.([]byte); ok {
-					s.logger.Debug("Parameters is bytes, attempting msgpack decode",
-						"len", len(paramsBytes),
-					)
-					// Try to decode as msgpack array
-					var paramArray []interface{}
-					if err := msgpack.Decode(paramsBytes, &paramArray); err != nil {
-						s.logger.Warn("Failed to decode parameters bytes as msgpack array", "error", err)
-						params = []any{}
-					} else {
-						params = paramArray
-						s.logger.Debug("Decoded parameters from bytes",
-							"param_count", len(params),
-							"params", params,
-						)
-					}
-				} else if paramsArray, ok := paramsVal.([]interface{}); ok {
-					params = paramsArray
-					s.logger.Debug("Extracted parameters array",
-						"param_count", len(params),
-						"params", params,
-					)
-				} else if paramsStr, ok := paramsVal.(string); ok {
-					// Parameters is a string - likely Arrow IPC-encoded RecordBatch
-					s.logger.Debug("Parameters is string, treating as Arrow IPC",
-						"len", len(paramsStr),
-					)
-					paramsBytes := []byte(paramsStr)
-					paramReader, err := ipc.NewReader(bytes.NewReader(paramsBytes))
-					if err != nil {
-						s.logger.Warn("Failed to create IPC reader from string", "error", err)
-						params = []any{}
-					} else {
-						defer paramReader.Release()
-						if paramReader.Next() {
-							paramRecord := paramReader.RecordBatch()
-							params = make([]any, paramRecord.NumCols())
-							for i := 0; i < int(paramRecord.NumCols()); i++ {
-								col := paramRecord.Column(i)
-								if col.Len() > 0 {
-									params[i] = extractScalarValue(col, 0)
-								} else {
-									params[i] = nil
-								}
-							}
-							s.logger.Debug("Decoded parameters from Arrow IPC string",
-								"param_count", len(params),
-								"params", params,
-							)
-						} else {
-							params = []any{}
-						}
-					}
-				} else {
-					s.logger.Warn("Parameters field has unexpected type",
-						"type", fmt.Sprintf("%T", paramsVal),
-					)
-					params = []any{}
-				}
-			} else {
-				s.logger.Warn("No 'parameters' field in map")
-				params = []any{}
-			}
-		}
-	} else {
-		params = []any{}
-	}
+	// Decode function parameters from msgpack-encoded metadata
+	params := decodeTableFunctionParams(paramMsg.AppMetadata, s.logger)
 
 	// Create input RecordReader from stream
 	inputReader, err := flight.NewRecordReader(stream, ipc.WithAllocator(s.allocator))
