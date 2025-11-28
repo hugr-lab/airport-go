@@ -15,7 +15,3 @@ linters:
     - unconvert     # Remove unnecessary type conversions
     - unparam       # Report unused function parameters
     - goprintffuncname  # Check printf-like functions
-
-issues:
-  max-per-linter: 0
-  max-same-issues: 0
