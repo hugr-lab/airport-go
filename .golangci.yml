@@ -20,7 +20,9 @@ linters:
 linters-settings:
   errcheck:
     check-blank: false  # Don't check for unchecked blank assigns
-    ignore: Close,Write  # Ignore errors from Close and Write in defers
+    exclude-functions:  # Ignore errors from Close and Write in defers
+      - (io.Closer).Close
+      - (io.Writer).Write
 
   govet:
     enable-all: true

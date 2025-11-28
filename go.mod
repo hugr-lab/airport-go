@@ -1,6 +1,6 @@
 module github.com/hugr-lab/airport-go
 
-go 1.25.0
+go 1.25
 
 require (
 	github.com/apache/arrow-go/v18 v18.4.1
