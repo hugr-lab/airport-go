@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -46,6 +47,10 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 
 	case "table_function_flight_info":
 		return s.handleTableFunctionFlightInfo(ctx, action, stream)
+
+	// flight_info is used for time travel queries with AT syntax
+	case "flight_info":
+		return s.handleFlightInfo(ctx, action, stream)
 
 	// DDL operations
 	case "CreateSchema", "DropSchema", "CreateTable", "DropTable", "AlterTableAddColumn", "AlterTableDropColumn":
@@ -1165,6 +1170,173 @@ func (s *Server) handleListAllTables(ctx context.Context, stream flight.FlightSe
 
 	s.logger.Debug("handleListAllTables completed", "schema_count", len(schemas), "table_count", totalTables)
 	return nil
+}
+
+// handleFlightInfo returns FlightInfo for a descriptor with time travel support.
+// This action is used by DuckDB for time travel queries with AT syntax.
+func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
+	// The flight_info action structure
+	var request struct {
+		Descriptor string `msgpack:"descriptor"`
+		AtUnit     string `msgpack:"at_unit"`
+		AtValue    string `msgpack:"at_value"`
+	}
+
+	if len(action.GetBody()) > 0 {
+		s.logger.Debug("flight_info request body",
+			"size", len(action.GetBody()),
+			"hex", fmt.Sprintf("%x", action.GetBody()),
+		)
+		if err := msgpack.Decode(action.GetBody(), &request); err != nil {
+			s.logger.Error("Failed to decode flight_info request", "error", err)
+			return status.Errorf(codes.InvalidArgument, "invalid request: %v", err)
+		}
+	}
+
+	// Parse the FlightDescriptor from the serialized descriptor string
+	desc := &flight.FlightDescriptor{}
+	if err := proto.Unmarshal([]byte(request.Descriptor), desc); err != nil {
+		s.logger.Error("Failed to parse FlightDescriptor", "error", err)
+		return status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
+	}
+
+	s.logger.Debug("handleFlightInfo called",
+		"descriptor_type", desc.GetType(),
+		"path", desc.GetPath(),
+		"at_unit", fmt.Sprintf("%q", request.AtUnit),
+		"at_value", fmt.Sprintf("%q", request.AtValue),
+	)
+
+	// Extract schema and table/function name from path
+	path := desc.GetPath()
+	if len(path) != 2 {
+		return status.Errorf(codes.InvalidArgument, "invalid descriptor path, expected [schema, table], got %v", path)
+	}
+
+	schemaName := path[0]
+	tableOrFunctionName := path[1]
+
+	// Look up schema
+	schema, err := s.catalog.Schema(ctx, schemaName)
+	if err != nil {
+		return status.Errorf(codes.NotFound, "schema not found: %s", schemaName)
+	}
+
+	// Look up table
+	table, err := schema.Table(ctx, tableOrFunctionName)
+	if err != nil {
+		return status.Errorf(codes.NotFound, "table not found: %s.%s", schemaName, tableOrFunctionName)
+	}
+
+	// Get table schema
+	tableSchema := table.ArrowSchema()
+	if tableSchema == nil {
+		return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", schemaName, tableOrFunctionName)
+	}
+
+	// Parse time travel parameters and create ticket
+	var ts *int64
+	var tsNs *int64
+	if request.AtUnit != "" && request.AtValue != "" {
+		switch request.AtUnit {
+		case "TIMESTAMP":
+			// Parse timestamp string to Unix seconds
+			// Value format: "2024-01-01 00:00:00"
+			t, err := time.Parse("2006-01-02 15:04:05", request.AtValue)
+			if err == nil {
+				tsVal := t.Unix()
+				ts = &tsVal
+			} else {
+				s.logger.Error("Failed to parse timestamp value", "error", err, "value", request.AtValue)
+			}
+		case "VERSION":
+			// Parse version number
+			var tsVal int64
+			_, err := fmt.Sscanf(request.AtValue, "%d", &tsVal)
+			if err == nil {
+				ts = &tsVal
+			} else {
+				s.logger.Error("Failed to parse version value", "error", err, "value", request.AtValue)
+			}
+		default:
+			s.logger.Error("Unsupported time travel unit", "unit", request.AtUnit)
+		}
+	}
+
+	// Create ticket with time travel parameters
+	ticketData := TicketData{
+		Schema: schemaName,
+		Table:  tableOrFunctionName,
+		Ts:     ts,
+		TsNs:   tsNs,
+	}
+	ticket, err := json.Marshal(ticketData)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to encode ticket: %v", err)
+	}
+
+	// Prepare app_metadata for time travel info if present
+	var appMetadata []byte
+	if ts != nil || tsNs != nil {
+		// Encode time travel metadata as msgpack
+		metadata := map[string]interface{}{
+			"time_travel": true,
+		}
+		if ts != nil {
+			metadata["ts"] = *ts
+		}
+		if tsNs != nil {
+			metadata["ts_ns"] = *tsNs
+		}
+		var err error
+		appMetadata, err = msgpack.Encode(metadata)
+		if err != nil {
+			s.logger.Error("Failed to encode app_metadata", "error", err)
+		}
+	} else {
+		// Even for non-time-travel queries, provide empty metadata map
+		appMetadata, _ = msgpack.Encode(map[string]interface{}{})
+	}
+
+	// Create FlightInfo
+	flightInfo := &flight.FlightInfo{
+		Schema:           flight.SerializeSchema(tableSchema, s.allocator),
+		FlightDescriptor: desc,
+		Endpoint: []*flight.FlightEndpoint{
+			{
+				Ticket: &flight.Ticket{
+					Ticket: ticket,
+				},
+				Location: []*flight.Location{
+					{
+						Uri: "grpc://" + s.address,
+					},
+				},
+			},
+		},
+		TotalRecords: -1,
+		TotalBytes:   -1,
+		AppMetadata:  appMetadata,
+	}
+
+	// Serialize FlightInfo
+	infoBytes, err := proto.Marshal(flightInfo)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to marshal FlightInfo: %v", err)
+	}
+
+	// Send response
+	result := &flight.Result{
+		Body: infoBytes,
+	}
+
+	s.logger.Debug("handleFlightInfo completed",
+		"schema", schemaName,
+		"table", tableOrFunctionName,
+		"has_time_travel", ts != nil || tsNs != nil,
+	)
+
+	return stream.Send(result)
 }
 
 // handleEndpoints returns flight endpoints for a descriptor.
