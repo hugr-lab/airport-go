@@ -14,18 +14,20 @@ func TestInsertDescriptorJSON(t *testing.T) {
 		{
 			name: "basic insert",
 			descriptor: InsertDescriptor{
+				Operation:  "insert",
 				SchemaName: "main",
 				TableName:  "users",
 			},
-			wantJSON: `{"schema_name":"main","table_name":"users"}`,
+			wantJSON: `{"operation":"insert","schema_name":"main","table_name":"users"}`,
 		},
 		{
 			name: "with special characters",
 			descriptor: InsertDescriptor{
+				Operation:  "insert",
 				SchemaName: "my_schema",
 				TableName:  "my_table_2024",
 			},
-			wantJSON: `{"schema_name":"my_schema","table_name":"my_table_2024"}`,
+			wantJSON: `{"operation":"insert","schema_name":"my_schema","table_name":"my_table_2024"}`,
 		},
 	}
 
@@ -66,29 +68,32 @@ func TestUpdateDescriptorJSON(t *testing.T) {
 		{
 			name: "update with rowids",
 			descriptor: UpdateDescriptor{
+				Operation:  "update",
 				SchemaName: "main",
 				TableName:  "users",
 				RowIds:     []int64{1, 2, 3},
 			},
-			wantJSON: `{"schema_name":"main","table_name":"users","row_ids":[1,2,3]}`,
+			wantJSON: `{"operation":"update","schema_name":"main","table_name":"users","row_ids":[1,2,3]}`,
 		},
 		{
 			name: "update single row",
 			descriptor: UpdateDescriptor{
+				Operation:  "update",
 				SchemaName: "test_schema",
 				TableName:  "test_table",
 				RowIds:     []int64{42},
 			},
-			wantJSON: `{"schema_name":"test_schema","table_name":"test_table","row_ids":[42]}`,
+			wantJSON: `{"operation":"update","schema_name":"test_schema","table_name":"test_table","row_ids":[42]}`,
 		},
 		{
 			name: "update many rows",
 			descriptor: UpdateDescriptor{
+				Operation:  "update",
 				SchemaName: "main",
 				TableName:  "large_table",
 				RowIds:     []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			},
-			wantJSON: `{"schema_name":"main","table_name":"large_table","row_ids":[1,2,3,4,5,6,7,8,9,10]}`,
+			wantJSON: `{"operation":"update","schema_name":"main","table_name":"large_table","row_ids":[1,2,3,4,5,6,7,8,9,10]}`,
 		},
 	}
 
@@ -185,15 +190,15 @@ func TestDeleteActionJSON(t *testing.T) {
 	}
 }
 
-func TestDMLResultJSON(t *testing.T) {
+func TestDMLResultJSONType(t *testing.T) {
 	tests := []struct {
 		name     string
-		result   DMLResult
+		result   DMLResultJSON
 		wantJSON string
 	}{
 		{
 			name: "success result",
-			result: DMLResult{
+			result: DMLResultJSON{
 				Status:       "success",
 				AffectedRows: 5,
 				Message:      "Deleted 5 rows",
@@ -202,7 +207,7 @@ func TestDMLResultJSON(t *testing.T) {
 		},
 		{
 			name: "error result",
-			result: DMLResult{
+			result: DMLResultJSON{
 				Status:       "error",
 				AffectedRows: 0,
 				Message:      "Table not found",
@@ -212,7 +217,7 @@ func TestDMLResultJSON(t *testing.T) {
 		},
 		{
 			name: "success without message",
-			result: DMLResult{
+			result: DMLResultJSON{
 				Status:       "success",
 				AffectedRows: 10,
 			},
@@ -233,7 +238,7 @@ func TestDMLResultJSON(t *testing.T) {
 			}
 
 			// Unmarshal back
-			var got DMLResult
+			var got DMLResultJSON
 			if err := json.Unmarshal([]byte(tt.wantJSON), &got); err != nil {
 				t.Fatalf("Unmarshal() error = %v", err)
 			}

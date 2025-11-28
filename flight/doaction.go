@@ -33,12 +33,6 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 	actionType := action.GetType()
 
 	switch actionType {
-	case "ExecuteScalarFunction":
-		return s.executeScalarFunction(ctx, action, stream)
-
-	case "GetTableFunctionInfo":
-		return s.getTableFunctionInfo(ctx, action, stream)
-
 	case "table_function_flight_info":
 		return s.handleTableFunctionFlightInfo(ctx, action, stream)
 
@@ -50,10 +44,6 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 	case "CreateSchema", "DropSchema", "CreateTable", "DropTable", "AlterTableAddColumn", "AlterTableDropColumn":
 		return s.handleDDLAction(action, stream)
 
-	// DML operations
-	case "Delete":
-		return s.handleDMLAction(action, stream)
-
 	// Required Airport actions
 	case "list_schemas":
 		return s.handleListSchemas(ctx, action, stream)
@@ -64,6 +54,9 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 	// Optional Airport actions
 	case "create_transaction":
 		return s.handleCreateTransaction(ctx, action, stream)
+
+	case "get_transaction_status":
+		return s.handleGetTransactionStatus(ctx, action, stream)
 
 	default:
 		return status.Errorf(codes.Unimplemented, "unknown action type: %s", actionType)

@@ -384,8 +384,7 @@ func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, str
 
 // handleCreateTransaction returns a transaction identifier.
 // This is an optional Airport action for transaction management.
-//
-//nolint:unparam
+// If no TransactionManager is configured, returns nil identifier.
 func (s *Server) handleCreateTransaction(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
 	// Decode parameters
 	var params struct {
@@ -401,11 +400,36 @@ func (s *Server) handleCreateTransaction(ctx context.Context, action *flight.Act
 
 	s.logger.Debug("handleCreateTransaction called", "catalog_name", params.CatalogName)
 
-	// For now, return nil identifier (no transaction support)
-	// Per spec: GetTransactionIdentifierResult with optional identifier
-	// IMPORTANT: The field must be present in the map, with nil value
+	// If no TransactionManager is configured, return nil identifier
+	if s.txManager == nil {
+		response := map[string]interface{}{
+			"identifier": nil,
+		}
+
+		responseBody, err := msgpack.Encode(response)
+		if err != nil {
+			s.logger.Error("Failed to encode transaction response", "error", err)
+			return status.Errorf(codes.Internal, "failed to encode response: %v", err)
+		}
+
+		if err := stream.Send(&flight.Result{Body: responseBody}); err != nil {
+			s.logger.Error("Failed to send transaction result", "error", err)
+			return status.Errorf(codes.Internal, "failed to send result: %v", err)
+		}
+
+		s.logger.Debug("handleCreateTransaction completed", "has_transaction", false)
+		return nil
+	}
+
+	// Create transaction using the TransactionManager
+	txID, err := s.txManager.BeginTransaction(ctx)
+	if err != nil {
+		s.logger.Error("Failed to begin transaction", "error", err)
+		return status.Errorf(codes.Internal, "failed to create transaction: %v", err)
+	}
+
 	response := map[string]interface{}{
-		"identifier": nil, // Explicitly set to nil for optional field
+		"identifier": txID,
 	}
 
 	responseBody, err := msgpack.Encode(response)
@@ -414,16 +438,73 @@ func (s *Server) handleCreateTransaction(ctx context.Context, action *flight.Act
 		return status.Errorf(codes.Internal, "failed to encode response: %v", err)
 	}
 
-	result := &flight.Result{
-		Body: responseBody,
-	}
-
-	if err := stream.Send(result); err != nil {
+	if err := stream.Send(&flight.Result{Body: responseBody}); err != nil {
 		s.logger.Error("Failed to send transaction result", "error", err)
 		return status.Errorf(codes.Internal, "failed to send result: %v", err)
 	}
 
-	s.logger.Debug("handleCreateTransaction completed", "has_transaction", false)
+	s.logger.Debug("handleCreateTransaction completed", "tx_id", txID)
+	return nil
+}
+
+// handleGetTransactionStatus returns the current state of a transaction.
+// This is an optional Airport action for transaction management.
+func (s *Server) handleGetTransactionStatus(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
+	// Decode parameters
+	var params struct {
+		TransactionID string `msgpack:"transaction_id"`
+	}
+
+	if len(action.GetBody()) > 0 {
+		if err := msgpack.Decode(action.GetBody(), &params); err != nil {
+			s.logger.Error("Failed to decode get_transaction_status parameters", "error", err)
+			return status.Errorf(codes.InvalidArgument, "invalid parameters: %v", err)
+		}
+	}
+
+	s.logger.Debug("handleGetTransactionStatus called", "tx_id", params.TransactionID)
+
+	// If no TransactionManager is configured, return not found
+	if s.txManager == nil {
+		response := map[string]interface{}{
+			"status": "",
+			"exists": false,
+		}
+
+		responseBody, err := msgpack.Encode(response)
+		if err != nil {
+			s.logger.Error("Failed to encode transaction status response", "error", err)
+			return status.Errorf(codes.Internal, "failed to encode response: %v", err)
+		}
+
+		if err := stream.Send(&flight.Result{Body: responseBody}); err != nil {
+			s.logger.Error("Failed to send transaction status result", "error", err)
+			return status.Errorf(codes.Internal, "failed to send result: %v", err)
+		}
+
+		return nil
+	}
+
+	// Get transaction status
+	state, exists := s.txManager.GetTransactionStatus(ctx, params.TransactionID)
+
+	response := map[string]interface{}{
+		"status": string(state),
+		"exists": exists,
+	}
+
+	responseBody, err := msgpack.Encode(response)
+	if err != nil {
+		s.logger.Error("Failed to encode transaction status response", "error", err)
+		return status.Errorf(codes.Internal, "failed to encode response: %v", err)
+	}
+
+	if err := stream.Send(&flight.Result{Body: responseBody}); err != nil {
+		s.logger.Error("Failed to send transaction status result", "error", err)
+		return status.Errorf(codes.Internal, "failed to send result: %v", err)
+	}
+
+	s.logger.Debug("handleGetTransactionStatus completed", "tx_id", params.TransactionID, "exists", exists, "status", state)
 	return nil
 }
 

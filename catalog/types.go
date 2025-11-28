@@ -78,3 +78,18 @@ type FunctionSignature struct {
 // ScanFunc is a function type for table data retrieval.
 // User implements this to connect to their data source.
 type ScanFunc func(ctx context.Context, opts *ScanOptions) (array.RecordReader, error)
+
+// DMLResult holds the outcome of INSERT, UPDATE, or DELETE operations.
+// Returned by InsertableTable.Insert, UpdatableTable.Update, and DeletableTable.Delete.
+type DMLResult struct {
+	// AffectedRows is the count of rows inserted, updated, or deleted.
+	// For INSERT: number of rows successfully inserted.
+	// For UPDATE: number of rows matched and modified.
+	// For DELETE: number of rows removed.
+	AffectedRows int64
+
+	// ReturningData contains rows affected by the operation when
+	// a RETURNING clause was specified. nil if no RETURNING requested.
+	// Caller is responsible for releasing resources (RecordReader.Release).
+	ReturningData array.RecordReader
+}

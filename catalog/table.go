@@ -45,3 +45,43 @@ type DynamicSchemaTable interface {
 	// Returns error if parameters are invalid or schema cannot be determined.
 	SchemaForRequest(ctx context.Context, req *SchemaRequest) (*arrow.Schema, error)
 }
+
+// InsertableTable extends Table with INSERT capability.
+// Tables implement this interface to accept new rows via DoPut.
+// Implementations MUST be goroutine-safe.
+type InsertableTable interface {
+	Table
+
+	// Insert adds new rows to the table.
+	// The rows RecordReader provides batches of data to insert.
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	// Caller MUST call rows.Release() after Insert returns.
+	Insert(ctx context.Context, rows array.RecordReader) (*DMLResult, error)
+}
+
+// UpdatableTable extends Table with UPDATE capability.
+// Tables must have a rowid mechanism to identify rows for update.
+// Implementations MUST be goroutine-safe.
+type UpdatableTable interface {
+	Table
+
+	// Update modifies existing rows identified by rowIDs.
+	// The rows RecordReader provides replacement data for matched rows.
+	// Row order in RecordReader must correspond to rowIDs order.
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*DMLResult, error)
+}
+
+// DeletableTable extends Table with DELETE capability.
+// Tables must have a rowid mechanism to identify rows for deletion.
+// Implementations MUST be goroutine-safe.
+type DeletableTable interface {
+	Table
+
+	// Delete removes rows identified by rowIDs.
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	Delete(ctx context.Context, rowIDs []int64) (*DMLResult, error)
+}

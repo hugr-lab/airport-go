@@ -477,7 +477,7 @@ func timeTravelCatalog() catalog.Catalog {
 	cat, err := airport.NewCatalogBuilder().
 		Schema("versioned_schema").
 		Comment("Schema with time travel support").
-		CustomTable(ttTable).
+		Table(ttTable).
 		Build()
 
 	if err != nil {
