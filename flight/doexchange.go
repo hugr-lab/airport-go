@@ -174,6 +174,7 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 	defer writer.Close()
 
 	if err := writer.Begin(); err != nil {
+		reader.Release()
 		return status.Errorf(codes.Internal, "failed to send output schema: %v", err)
 	}
 
