@@ -211,8 +211,9 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 	}
 
 	// Validate RecordReader schema matches table schema
+	// For time-travel queries, schema may differ from current schema, so skip validation
 	readerSchema := reader.Schema()
-	if !tableSchema.Equal(readerSchema) {
+	if scanOpts.TimePoint == nil && !tableSchema.Equal(readerSchema) {
 		reader.Release()
 		s.logger.Error("RecordReader schema does not match table schema",
 			"schema", ticketData.Schema,
@@ -223,6 +224,16 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 		return nil, nil, status.Errorf(codes.Internal,
 			"schema mismatch: table has %d fields, reader has %d fields",
 			tableSchema.NumFields(), readerSchema.NumFields())
+	}
+
+	// For time-travel queries, use the reader's schema (which reflects historical state)
+	if scanOpts.TimePoint != nil {
+		s.logger.Debug("Time-travel query: using reader schema",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"reader_fields", readerSchema.NumFields(),
+			"current_table_fields", tableSchema.NumFields(),
+		)
 	}
 
 	return reader, readerSchema, nil

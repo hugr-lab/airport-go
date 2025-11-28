@@ -517,6 +517,7 @@ func (s *Server) getTableFunctionInfo(ctx context.Context, action *flight.Action
 }
 
 // serializeSchema serializes an Arrow schema to IPC bytes.
+//
 //nolint:unparam
 func serializeSchema(schema *arrow.Schema, allocator memory.Allocator) ([]byte, error) {
 	// Serialize schema to IPC format
@@ -953,7 +954,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 			"catalog":      "", // Empty catalog name
 			"name":         tableFuncInOut.Name(),
 			"comment":      tableFuncInOut.Comment(),
-			"input_schema": inputSchemaBytes, // Serialized Arrow schema of parameters
+			"input_schema": inputSchemaBytes,             // Serialized Arrow schema of parameters
 			"action_name":  "table_function_flight_info", // Use same action as normal table functions
 			"description":  tableFuncInOut.Comment(),
 			"extra_data":   nil,
@@ -1275,29 +1276,19 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 		return status.Errorf(codes.Internal, "failed to encode ticket: %v", err)
 	}
 
-	// Prepare app_metadata for time travel info if present
-	var appMetadata []byte
-	if ts != nil || tsNs != nil {
-		// Encode time travel metadata as msgpack
-		metadata := map[string]interface{}{
-			"time_travel": true,
-		}
-		if ts != nil {
-			metadata["ts"] = *ts
-		}
-		if tsNs != nil {
-			metadata["ts_ns"] = *tsNs
-		}
-		var err error
-		appMetadata, err = msgpack.Encode(metadata)
-		if err != nil {
-			s.logger.Error("Failed to encode app_metadata", "error", err)
-		}
-	} else {
-		// Even for non-time-travel queries, provide empty metadata map
-		appMetadata, _ = msgpack.Encode(map[string]interface{}{})
-	}
-
+	// Prepare app_metadata - same structure as regular tables
+	// Time travel info is encoded in the ticket, not in app_metadata
+	appMetadata, _ := msgpack.Encode(map[string]interface{}{
+		"type":         "table",
+		"schema":       schema.Name(),
+		"catalog":      "", // Empty catalog name
+		"name":         table.Name(),
+		"comment":      table.Comment(),
+		"input_schema": nil,
+		"action_name":  nil,
+		"description":  nil,
+		"extra_data":   nil,
+	})
 	// Create FlightInfo
 	flightInfo := &flight.FlightInfo{
 		Schema:           flight.SerializeSchema(tableSchema, s.allocator),
@@ -1316,6 +1307,7 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 		},
 		TotalRecords: -1,
 		TotalBytes:   -1,
+		Ordered:      false,
 		AppMetadata:  appMetadata,
 	}
 
@@ -1341,6 +1333,7 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 
 // handleEndpoints returns flight endpoints for a descriptor.
 // This is a required Airport action that allows the server to receive additional context.
+//
 //nolint:unparam
 func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
 	// Decode AirportGetFlightEndpointsRequest
@@ -1375,6 +1368,8 @@ func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, str
 		"path", desc.GetPath(),
 		"has_filters", request.Parameters.JsonFilters != "",
 		"column_count", len(request.Parameters.ColumnIDs),
+		"at_unit", request.Parameters.AtUnit,
+		"at_value", request.Parameters.AtValue,
 	)
 
 	// Validate descriptor
@@ -1442,8 +1437,81 @@ func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, str
 			"param_count", len(params),
 		)
 	} else {
-		// Regular table scan
-		ticket, err = EncodeTicket(schemaName, tableOrFunctionName)
+		// Regular table scan - create ticket with optional time travel parameters
+		ticketData := TicketData{
+			Schema: schemaName,
+			Table:  tableOrFunctionName,
+		}
+
+		// Parse time travel parameters if present
+		if request.Parameters.AtUnit != "" && request.Parameters.AtValue != "" {
+			// Store timestamp based on unit (DuckDB sends "TIMESTAMP" and "VERSION" in uppercase)
+			switch request.Parameters.AtUnit {
+			case "TIMESTAMP", "timestamp":
+				// Parse timestamp string to Unix seconds
+				// Value format could be: "2024-01-01 00:00:00" or Unix epoch string
+				// Try parsing as timestamp string first
+				t, err := time.Parse("2006-01-02 15:04:05", request.Parameters.AtValue)
+				if err == nil {
+					tsVal := t.Unix()
+					ticketData.Ts = &tsVal
+					s.logger.Debug("Added time travel to ticket",
+						"schema", schemaName,
+						"table", tableOrFunctionName,
+						"unit", "timestamp",
+						"value", tsVal,
+						"parsed_from", request.Parameters.AtValue,
+					)
+				} else {
+					// Try parsing as Unix epoch integer
+					var tsVal int64
+					if _, err := fmt.Sscanf(request.Parameters.AtValue, "%d", &tsVal); err != nil {
+						s.logger.Error("Failed to parse timestamp", "at_value", request.Parameters.AtValue, "error", err)
+						return status.Errorf(codes.InvalidArgument, "invalid timestamp value: %v", err)
+					}
+					ticketData.Ts = &tsVal
+					s.logger.Debug("Added time travel to ticket",
+						"schema", schemaName,
+						"table", tableOrFunctionName,
+						"unit", "timestamp",
+						"value", tsVal,
+					)
+				}
+			case "TIMESTAMP_NS", "timestamp_ns":
+				// Parse nanosecond timestamp
+				var tsVal int64
+				if _, err := fmt.Sscanf(request.Parameters.AtValue, "%d", &tsVal); err != nil {
+					s.logger.Error("Failed to parse timestamp_ns", "at_value", request.Parameters.AtValue, "error", err)
+					return status.Errorf(codes.InvalidArgument, "invalid timestamp_ns value: %v", err)
+				}
+				ticketData.TsNs = &tsVal
+				s.logger.Debug("Added time travel to ticket",
+					"schema", schemaName,
+					"table", tableOrFunctionName,
+					"unit", "timestamp_ns",
+					"value", tsVal,
+				)
+			case "VERSION", "version":
+				// Parse version number as Unix seconds
+				var tsVal int64
+				if _, err := fmt.Sscanf(request.Parameters.AtValue, "%d", &tsVal); err != nil {
+					s.logger.Error("Failed to parse version", "at_value", request.Parameters.AtValue, "error", err)
+					return status.Errorf(codes.InvalidArgument, "invalid version value: %v", err)
+				}
+				ticketData.Ts = &tsVal
+				s.logger.Debug("Added time travel to ticket",
+					"schema", schemaName,
+					"table", tableOrFunctionName,
+					"unit", "version",
+					"value", tsVal,
+				)
+			default:
+				s.logger.Error("Unsupported at_unit", "at_unit", request.Parameters.AtUnit)
+				return status.Errorf(codes.InvalidArgument, "unsupported at_unit: %s", request.Parameters.AtUnit)
+			}
+		}
+
+		ticket, err = json.Marshal(ticketData)
 		if err != nil {
 			s.logger.Error("Failed to encode ticket", "error", err)
 			return status.Errorf(codes.Internal, "failed to encode ticket: %v", err)
@@ -1501,6 +1569,7 @@ func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, str
 
 // handleCreateTransaction returns a transaction identifier.
 // This is an optional Airport action for transaction management.
+//
 //nolint:unparam
 func (s *Server) handleCreateTransaction(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
 	// Decode parameters
