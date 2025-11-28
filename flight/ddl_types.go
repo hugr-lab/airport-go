@@ -1,15 +1,15 @@
 package flight
 
-import "github.com/apache/arrow/go/v18/arrow"
+import "github.com/apache/arrow-go/v18/arrow"
 
 // DDL action payload types for Flight DoAction RPC.
 // These structures represent JSON payloads sent in action.Body.
 
 // CreateSchemaAction represents a CREATE SCHEMA DDL command.
 type CreateSchemaAction struct {
-	SchemaName  string `json:"schema_name"`            // Name of schema to create
-	IfNotExists bool   `json:"if_not_exists"`          // If true, succeed silently if schema exists
-	Comment     string `json:"comment,omitempty"`      // Optional schema comment
+	SchemaName  string `json:"schema_name"`       // Name of schema to create
+	IfNotExists bool   `json:"if_not_exists"`     // If true, succeed silently if schema exists
+	Comment     string `json:"comment,omitempty"` // Optional schema comment
 }
 
 // DropSchemaAction represents a DROP SCHEMA DDL command.
@@ -21,11 +21,11 @@ type DropSchemaAction struct {
 
 // CreateTableAction represents a CREATE TABLE DDL command.
 type CreateTableAction struct {
-	SchemaName  string              `json:"schema_name"`            // Parent schema
-	TableName   string              `json:"table_name"`             // Name of table to create
-	IfNotExists bool                `json:"if_not_exists"`          // Idempotent flag
-	Schema      *ArrowSchemaPayload `json:"schema"`                 // Arrow schema definition
-	Comment     string              `json:"comment,omitempty"`      // Optional table comment
+	SchemaName  string              `json:"schema_name"`       // Parent schema
+	TableName   string              `json:"table_name"`        // Name of table to create
+	IfNotExists bool                `json:"if_not_exists"`     // Idempotent flag
+	Schema      *ArrowSchemaPayload `json:"schema"`            // Arrow schema definition
+	Comment     string              `json:"comment,omitempty"` // Optional table comment
 }
 
 // ArrowSchemaPayload represents an Arrow schema in JSON format.
@@ -51,10 +51,10 @@ type DropTableAction struct {
 
 // AlterTableAddColumnAction represents an ALTER TABLE ADD COLUMN DDL command.
 type AlterTableAddColumnAction struct {
-	SchemaName string             `json:"schema_name"` // Parent schema
-	TableName  string             `json:"table_name"`  // Table to alter
-	IfExists   bool               `json:"if_exists"`   // Idempotent flag (for table existence)
-	Column     ArrowFieldPayload  `json:"column"`      // Column to add
+	SchemaName string            `json:"schema_name"` // Parent schema
+	TableName  string            `json:"table_name"`  // Table to alter
+	IfExists   bool              `json:"if_exists"`   // Idempotent flag (for table existence)
+	Column     ArrowFieldPayload `json:"column"`      // Column to add
 }
 
 // AlterTableDropColumnAction represents an ALTER TABLE DROP COLUMN DDL command.

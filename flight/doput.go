@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/apache/arrow/go/v18/arrow/flight"
-	"github.com/apache/arrow/go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -28,7 +28,7 @@ import (
 func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 	ctx := stream.Context()
 
-	s.logger.Info("DoPut called")
+	s.logger.Debug("DoPut called")
 
 	// Receive first message to get descriptor and schema
 	msg, err := stream.Recv()
@@ -46,7 +46,7 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 		return status.Error(codes.InvalidArgument, "missing flight descriptor")
 	}
 
-	s.logger.Info("DoPut request",
+	s.logger.Debug("DoPut request",
 		"type", descriptor.GetType(),
 		"cmd_length", len(descriptor.GetCmd()),
 		"path_length", len(descriptor.GetPath()),
@@ -81,7 +81,7 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 		}
 	}
 
-	s.logger.Info("DoPut completed successfully")
+	s.logger.Debug("DoPut completed successfully")
 
 	return nil
 }
@@ -90,13 +90,14 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 // The command bytes can contain either:
 // - MessagePack-encoded parameters for queries
 // - JSON-encoded DML operation descriptors (INSERT, UPDATE)
+//nolint:unparam
 func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.FlightDescriptor, msg *flight.FlightData, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	cmd := descriptor.GetCmd()
 	if len(cmd) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "empty command in descriptor")
 	}
 
-	s.logger.Info("Processing DoPut command", "cmd_size", len(cmd))
+	s.logger.Debug("Processing DoPut command", "cmd_size", len(cmd))
 
 	// Try to detect if this is a DML operation by checking for JSON structure
 	// DML descriptors have schema_name and table_name fields
@@ -123,7 +124,7 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 		return nil, status.Errorf(codes.InvalidArgument, "invalid MessagePack parameters: %v", err)
 	}
 
-	s.logger.Info("Decoded parameters", "param_count", len(params))
+	s.logger.Debug("Decoded parameters", "param_count", len(params))
 
 	// Read Arrow data from stream if present
 	var recordCount int64
@@ -136,7 +137,7 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 	// Process records from client
 	for reader.Next() {
-		record := reader.Record()
+		record := reader.RecordBatch()
 		recordCount += record.NumRows()
 		s.logger.Debug("Received record batch",
 			"rows", record.NumRows(),
@@ -163,16 +164,17 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 // handleDoPutPath processes PATH-type DoPut requests.
 // Typically used for INSERT operations into a specific table.
+//nolint:unparam
 func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightDescriptor, msg *flight.FlightData, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	path := descriptor.GetPath()
 	if len(path) != 2 {
 		return nil, status.Error(codes.InvalidArgument, "path must contain [schema, table]")
 	}
 
-	schemaName := string(path[0])
-	tableName := string(path[1])
+	schemaName := path[0]
+	tableName := path[1]
 
-	s.logger.Info("Processing DoPut path",
+	s.logger.Debug("Processing DoPut path",
 		"schema", schemaName,
 		"table", tableName,
 	)
@@ -188,7 +190,7 @@ func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightD
 
 	// Process records
 	for reader.Next() {
-		record := reader.Record()
+		record := reader.RecordBatch()
 		recordCount += record.NumRows()
 		s.logger.Debug("Received record batch for insert",
 			"schema", schemaName,
@@ -218,15 +220,15 @@ func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightD
 
 // flightDataReader adapts FlightData stream to io.Reader for IPC reader.
 type flightDataReader struct {
-	firstMsg *flight.FlightData
-	stream   flight.FlightService_DoPutServer
+	firstMsg  *flight.FlightData
+	stream    flight.FlightService_DoPutServer
 	firstRead bool
 }
 
 func newFlightDataReader(firstMsg *flight.FlightData, stream flight.FlightService_DoPutServer) *flightDataReader {
 	return &flightDataReader{
-		firstMsg: firstMsg,
-		stream:   stream,
+		firstMsg:  firstMsg,
+		stream:    stream,
 		firstRead: false,
 	}
 }
@@ -257,6 +259,7 @@ func (r *flightDataReader) Read(p []byte) (n int, err error) {
 
 // handleDoPutInsert processes INSERT operations via DoPut.
 // The descriptor map should contain schema_name and table_name.
+//nolint:unparam
 func (s *Server) handleDoPutInsert(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	// Parse descriptor
 	descriptorBytes, err := json.Marshal(descriptorMap)
@@ -269,7 +272,7 @@ func (s *Server) handleDoPutInsert(descriptorMap map[string]interface{}, stream 
 		return nil, status.Errorf(codes.InvalidArgument, "invalid INSERT descriptor: %v", err)
 	}
 
-	s.logger.Info("Processing INSERT operation",
+	s.logger.Debug("Processing INSERT operation",
 		"schema", descriptor.SchemaName,
 		"table", descriptor.TableName,
 	)
@@ -285,6 +288,7 @@ func (s *Server) handleDoPutInsert(descriptorMap map[string]interface{}, stream 
 
 // handleDoPutUpdate processes UPDATE operations via DoPut.
 // The descriptor map should contain schema_name, table_name, and row_ids.
+//nolint:unparam
 func (s *Server) handleDoPutUpdate(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	// Parse descriptor
 	descriptorBytes, err := json.Marshal(descriptorMap)
@@ -297,7 +301,7 @@ func (s *Server) handleDoPutUpdate(descriptorMap map[string]interface{}, stream 
 		return nil, status.Errorf(codes.InvalidArgument, "invalid UPDATE descriptor: %v", err)
 	}
 
-	s.logger.Info("Processing UPDATE operation",
+	s.logger.Debug("Processing UPDATE operation",
 		"schema", descriptor.SchemaName,
 		"table", descriptor.TableName,
 		"row_count", len(descriptor.RowIds),

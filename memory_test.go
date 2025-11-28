@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -27,9 +27,9 @@ func TestMemoryLeaks(t *testing.T) {
 		scanFunc := func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 			builder := array.NewRecordBuilder(allocator, schema)
 			defer builder.Release()
-			record := builder.NewRecord()
+			record := builder.NewRecordBatch()
 			defer record.Release()
-			return array.NewRecordReader(schema, []arrow.Record{record})
+			return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 		}
 
 		cat, err := NewCatalogBuilder().
@@ -74,10 +74,10 @@ func TestMemoryLeaks(t *testing.T) {
 			builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
 			builder.Field(1).(*array.StringBuilder).AppendValues([]string{"a", "b", "c"}, nil)
 
-			record := builder.NewRecord()
+			record := builder.NewRecordBatch()
 			defer record.Release()
 
-			return array.NewRecordReader(schema, []arrow.Record{record})
+			return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 		}
 
 		cat, err := NewCatalogBuilder().
@@ -113,7 +113,7 @@ func TestMemoryLeaks(t *testing.T) {
 
 		// Read all records
 		for reader.Next() {
-			record := reader.Record()
+			record := reader.RecordBatch()
 			// Don't need to release - reader owns it
 			if record.NumRows() != 3 {
 				t.Errorf("Expected 3 rows, got %d", record.NumRows())
@@ -135,9 +135,9 @@ func TestMemoryLeaks(t *testing.T) {
 			builder := array.NewRecordBuilder(allocator, schema)
 			defer builder.Release()
 			builder.Field(0).(*array.Int64Builder).AppendValues([]int64{42}, nil)
-			record := builder.NewRecord()
+			record := builder.NewRecordBatch()
 			defer record.Release()
-			return array.NewRecordReader(schema, []arrow.Record{record})
+			return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 		}
 
 		cat, err := NewCatalogBuilder().
@@ -165,7 +165,7 @@ func TestMemoryLeaks(t *testing.T) {
 			}
 
 			for reader.Next() {
-				_ = reader.Record()
+				_ = reader.RecordBatch()
 			}
 
 			reader.Release()
@@ -188,7 +188,7 @@ func TestMemoryLeaks(t *testing.T) {
 			builder.Field(0).(*array.Float64Builder).AppendValues([]float64{1.0, 2.0}, nil)
 			builder.Field(1).(*array.Float64Builder).AppendValues([]float64{3.0, 4.0}, nil)
 
-			record := builder.NewRecord()
+			record := builder.NewRecordBatch()
 
 			// Verify record
 			if record.NumRows() != 2 {
@@ -237,9 +237,9 @@ func TestMemoryLeaksInConcurrentScans(t *testing.T) {
 		builder := array.NewRecordBuilder(allocator, schema)
 		defer builder.Release()
 		builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		defer record.Release()
-		return array.NewRecordReader(schema, []arrow.Record{record})
+		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 
 	cat, err := NewCatalogBuilder().
@@ -272,7 +272,7 @@ func TestMemoryLeaksInConcurrentScans(t *testing.T) {
 			defer reader.Release()
 
 			for reader.Next() {
-				_ = reader.Record()
+				_ = reader.RecordBatch()
 			}
 
 			done <- true
@@ -308,9 +308,9 @@ func TestNoMemoryLeaksWithErrors(t *testing.T) {
 
 		// Odd calls succeed
 		builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1}, nil)
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		defer record.Release()
-		return array.NewRecordReader(schema, []arrow.Record{record})
+		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 
 	cat, _ := NewCatalogBuilder().
@@ -336,7 +336,7 @@ func TestNoMemoryLeaksWithErrors(t *testing.T) {
 
 		// For successful scans, read and release
 		for reader.Next() {
-			_ = reader.Record()
+			_ = reader.RecordBatch()
 		}
 		reader.Release()
 	}

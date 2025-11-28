@@ -13,8 +13,8 @@ A Go package (`airport`) that provides a high-level API for building Apache Arro
 
 **Language/Version**: Go 1.25+ (recommended for latest stdlib features and performance)
 **Primary Dependencies**:
-- `github.com/apache/arrow/go/v18/arrow` - Arrow data structures and IPC
-- `github.com/apache/arrow/go/v18/arrow/flight` - Flight RPC protocol
+- `github.com/apache/arrow-go/v18/arrow` - Arrow data structures and IPC
+- `github.com/apache/arrow-go/v18/arrow/flight` - Flight RPC protocol
 - `google.golang.org/grpc` - gRPC server framework
 - `github.com/klauspost/compress/zstd` - ZStandard compression for catalog
 - `github.com/vmihailenco/msgpack/v5` - MessagePack for parameter serialization

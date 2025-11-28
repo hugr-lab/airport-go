@@ -4,8 +4,8 @@ package flight
 import (
 	"log/slog"
 
-	"github.com/apache/arrow/go/v18/arrow/flight"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
 	"github.com/hugr-lab/airport-go/catalog"

@@ -58,4 +58,9 @@ type Schema interface {
 	// Returns empty slice (not nil) if no table functions available.
 	// MUST respect context cancellation.
 	TableFunctions(ctx context.Context) ([]TableFunction, error)
+
+	// TableFunctionsInOut returns all table functions that accept row sets as input.
+	// Returns empty slice (not nil) if no in-out table functions available.
+	// MUST respect context cancellation.
+	TableFunctionsInOut(ctx context.Context) ([]TableFunctionInOut, error)
 }

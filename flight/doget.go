@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/flight"
-	"github.com/apache/arrow/go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -30,7 +30,7 @@ import (
 func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
 	ctx := stream.Context()
 
-	s.logger.Info("DoGet called", "ticket_size", len(ticket.GetTicket()))
+	s.logger.Debug("DoGet called", "ticket_size", len(ticket.GetTicket()))
 
 	// Decode ticket to get schema/table names
 	ticketData, err := DecodeTicket(ticket.GetTicket())
@@ -39,7 +39,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		return status.Errorf(codes.InvalidArgument, "invalid ticket: %v", err)
 	}
 
-	s.logger.Info("DoGet request",
+	s.logger.Debug("DoGet request",
 		"schema", ticketData.Schema,
 		"table", ticketData.Table,
 		"table_function", ticketData.TableFunction,
@@ -77,7 +77,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	}
 	defer reader.Release()
 
-	s.logger.Info("Starting record streaming",
+	s.logger.Debug("Starting record streaming",
 		"schema", ticketData.Schema,
 		"target", fmt.Sprintf("%s%s", ticketData.Table, ticketData.TableFunction),
 		"num_fields", readerSchema.NumFields(),
@@ -95,7 +95,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		// Check context cancellation (T029)
 		select {
 		case <-ctx.Done():
-			s.logger.Info("DoGet cancelled by client",
+			s.logger.Debug("DoGet cancelled by client",
 				"schema", ticketData.Schema,
 				"table", ticketData.Table,
 				"batches_sent", batchCount,
@@ -105,7 +105,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		default:
 		}
 
-		record := reader.Record()
+		record := reader.RecordBatch()
 		batchCount++
 		totalRows += record.NumRows()
 
@@ -133,7 +133,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	if err := reader.Err(); err != nil {
 		// Check if error is EOF (normal termination)
 		if err == io.EOF {
-			s.logger.Info("DoGet completed (EOF)",
+			s.logger.Debug("DoGet completed (EOF)",
 				"schema", ticketData.Schema,
 				"table", ticketData.Table,
 				"batches_sent", batchCount,
@@ -150,7 +150,7 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 		}
 	}
 
-	s.logger.Info("DoGet completed successfully",
+	s.logger.Debug("DoGet completed successfully",
 		"schema", ticketData.Schema,
 		"table", ticketData.Table,
 		"batches_sent", batchCount,
@@ -191,7 +191,7 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 
 	// Log time-travel query if timestamp parameters present
 	if scanOpts.TimePoint != nil {
-		s.logger.Info("Point-in-time query",
+		s.logger.Debug("Point-in-time query",
 			"schema", ticketData.Schema,
 			"table", ticketData.Table,
 			"time_unit", scanOpts.TimePoint.Unit,
@@ -254,7 +254,7 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 			ticketData.Schema, ticketData.TableFunction)
 	}
 
-	s.logger.Info("Executing table function",
+	s.logger.Debug("Executing table function",
 		"schema", ticketData.Schema,
 		"function", ticketData.TableFunction,
 		"param_count", len(ticketData.FunctionParams),
@@ -271,7 +271,7 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 		return nil, nil, status.Errorf(codes.Internal, "failed to get function schema: %v", err)
 	}
 
-	s.logger.Info("Table function schema determined",
+	s.logger.Debug("Table function schema determined",
 		"schema", ticketData.Schema,
 		"function", ticketData.TableFunction,
 		"output_fields", funcSchema.NumFields(),

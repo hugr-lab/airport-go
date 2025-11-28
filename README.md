@@ -35,9 +35,9 @@ import (
     "log"
     "net"
 
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/array"
-    "github.com/apache/arrow/go/v18/arrow/memory"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow/memory"
     "google.golang.org/grpc"
 
     "github.com/hugr-lab/airport-go"

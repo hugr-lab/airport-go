@@ -6,11 +6,11 @@ import (
 	"io"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/flight"
-	"github.com/apache/arrow/go/v18/arrow/ipc"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -131,7 +131,7 @@ func TestDMLInsert(t *testing.T) {
 	builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
 	builder.Field(1).(*array.StringBuilder).AppendValues([]string{"Alice", "Bob", "Charlie"}, nil)
 
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
 	// Create INSERT descriptor
@@ -208,7 +208,7 @@ func TestDMLUpdate(t *testing.T) {
 
 	builder.Field(0).(*array.StringBuilder).AppendValues([]string{"Updated Alice", "Updated Bob"}, nil)
 
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
 	// Create UPDATE descriptor with row_ids
@@ -292,8 +292,8 @@ func TestDMLInsertWithGeometry(t *testing.T) {
 	// WKB format: byte order (1 byte) + type (4 bytes) + x (8 bytes) + y (8 bytes)
 	// This is a simplified example - in real use, would use orb library
 	point1WKB := []byte{
-		0x01,                                           // Little endian
-		0x01, 0x00, 0x00, 0x00,                         // Point type (1)
+		0x01,                   // Little endian
+		0x01, 0x00, 0x00, 0x00, // Point type (1)
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F, // x = 1.0
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, // y = 2.0
 	}
@@ -306,7 +306,7 @@ func TestDMLInsertWithGeometry(t *testing.T) {
 
 	builder.Field(2).(*array.BinaryBuilder).AppendValues([][]byte{point1WKB, point2WKB}, nil)
 
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
 	// Create INSERT descriptor

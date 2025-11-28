@@ -5,11 +5,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
 	"github.com/hugr-lab/airport-go"
@@ -23,10 +24,12 @@ func main() {
 		log.Fatalf("Failed to create catalog: %v", err)
 	}
 
-	// Create and start server
+	// Create and start server with debug logging
+	debugLevel := slog.LevelDebug
 	config := airport.ServerConfig{
-		Catalog: cat,
-		Address: "localhost:50051",
+		Catalog:  cat,
+		Address:  "localhost:50051",
+		LogLevel: &debugLevel,
 	}
 
 	grpcServer := grpc.NewServer(airport.ServerOptions(config)...)
@@ -85,12 +88,12 @@ func createCatalogWithFunctions() (catalog.Catalog, error) {
 func makeScanFunc(schema *arrow.Schema, data [][]interface{}) func(context.Context, *catalog.ScanOptions) (array.RecordReader, error) {
 	return func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 		record := buildRecord(schema, data)
-		return array.NewRecordReader(schema, []arrow.Record{record})
+		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 }
 
-// buildRecord creates an Arrow record from test data.
-func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
+// buildRecord creates an Arrow record batch from test data.
+func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
 
@@ -105,7 +108,7 @@ func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
 		}
 	}
 
-	return builder.NewRecord()
+	return builder.NewRecordBatch()
 }
 
 // multiplyFunc multiplies an integer column by a constant factor.
@@ -130,7 +133,7 @@ func (f *multiplyFunc) Signature() catalog.FunctionSignature {
 	}
 }
 
-func (f *multiplyFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Record, error) {
+func (f *multiplyFunc) Execute(ctx context.Context, input arrow.RecordBatch) (arrow.Array, error) {
 	if input.NumCols() != 2 {
 		return nil, fmt.Errorf("MULTIPLY expects 2 columns, got %d", input.NumCols())
 	}
@@ -150,14 +153,7 @@ func (f *multiplyFunc) Execute(ctx context.Context, input arrow.Record) (arrow.R
 		}
 	}
 
-	resultArray := builder.NewInt64Array()
-	defer resultArray.Release()
-
-	resultSchema := arrow.NewSchema([]arrow.Field{
-		{Name: "result", Type: arrow.PrimitiveTypes.Int64},
-	}, nil)
-
-	return array.NewRecord(resultSchema, []arrow.Array{resultArray}, int64(resultArray.Len())), nil
+	return builder.NewInt64Array(), nil
 }
 
 // generateSeriesFunc generates a series of integers from start to stop.
@@ -196,28 +192,39 @@ func (f *generateSeriesFunc) Execute(ctx context.Context, params []interface{}, 
 		return nil, fmt.Errorf("GENERATE_SERIES requires 2 or 3 parameters, got %d", len(params))
 	}
 
-	// Extract parameters
-	start, ok := params[0].(float64) // JSON numbers decode as float64
-	if !ok {
-		return nil, fmt.Errorf("start parameter must be number, got %T", params[0])
+	// Extract parameters - can be float64 (from JSON) or int64 (from Arrow)
+	toInt64 := func(v interface{}) (int64, error) {
+		switch val := v.(type) {
+		case float64:
+			return int64(val), nil
+		case int64:
+			return val, nil
+		default:
+			return 0, fmt.Errorf("parameter must be number, got %T", v)
+		}
 	}
 
-	stop, ok := params[1].(float64)
-	if !ok {
-		return nil, fmt.Errorf("stop parameter must be number, got %T", params[1])
+	start, err := toInt64(params[0])
+	if err != nil {
+		return nil, fmt.Errorf("start: %w", err)
 	}
 
-	step := float64(1)
+	stop, err := toInt64(params[1])
+	if err != nil {
+		return nil, fmt.Errorf("stop: %w", err)
+	}
+
+	step := int64(1)
 	if len(params) == 3 {
-		step, ok = params[2].(float64)
-		if !ok {
-			return nil, fmt.Errorf("step parameter must be number, got %T", params[2])
+		step, err = toInt64(params[2])
+		if err != nil {
+			return nil, fmt.Errorf("step: %w", err)
 		}
 	}
 
 	// Generate series
 	var values []int64
-	for i := int64(start); (step > 0 && i <= int64(stop)) || (step < 0 && i >= int64(stop)); i += int64(step) {
+	for i := start; (step > 0 && i <= stop) || (step < 0 && i >= stop); i += step {
 		values = append(values, i)
 	}
 
@@ -234,9 +241,9 @@ func (f *generateSeriesFunc) Execute(ctx context.Context, params []interface{}, 
 		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
 	}, nil)
 
-	record := array.NewRecord(schema, []arrow.Array{valueArray}, int64(valueArray.Len()))
+	record := array.NewRecordBatch(schema, []arrow.Array{valueArray}, int64(valueArray.Len()))
 
-	return array.NewRecordReader(schema, []arrow.Record{record})
+	return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 }
 
 // generateRangeFunc generates a table with dynamic schema based on column count parameter.
@@ -268,9 +275,14 @@ func (f *generateRangeFunc) SchemaForParameters(ctx context.Context, params []in
 		return nil, fmt.Errorf("GENERATE_RANGE requires 3 parameters, got %d", len(params))
 	}
 
-	// Extract column count parameter
-	columnCount, ok := params[2].(float64)
-	if !ok {
+	// Extract column count parameter - can be float64 (from JSON) or int64 (from Arrow)
+	var columnCount int64
+	switch v := params[2].(type) {
+	case float64:
+		columnCount = int64(v)
+	case int64:
+		columnCount = v
+	default:
 		return nil, fmt.Errorf("column_count parameter must be number, got %T", params[2])
 	}
 
@@ -295,20 +307,31 @@ func (f *generateRangeFunc) Execute(ctx context.Context, params []interface{}, o
 		return nil, fmt.Errorf("GENERATE_RANGE requires 3 parameters, got %d", len(params))
 	}
 
-	// Extract parameters
-	start, ok := params[0].(float64)
-	if !ok {
-		return nil, fmt.Errorf("start parameter must be number, got %T", params[0])
+	// Extract parameters - can be float64 (from JSON) or int64 (from Arrow)
+	toInt64 := func(v interface{}) (int64, error) {
+		switch val := v.(type) {
+		case float64:
+			return int64(val), nil
+		case int64:
+			return val, nil
+		default:
+			return 0, fmt.Errorf("parameter must be number, got %T", v)
+		}
 	}
 
-	stop, ok := params[1].(float64)
-	if !ok {
-		return nil, fmt.Errorf("stop parameter must be number, got %T", params[1])
+	start, err := toInt64(params[0])
+	if err != nil {
+		return nil, fmt.Errorf("start: %w", err)
 	}
 
-	columnCount, ok := params[2].(float64)
-	if !ok {
-		return nil, fmt.Errorf("column_count parameter must be number, got %T", params[2])
+	stop, err := toInt64(params[1])
+	if err != nil {
+		return nil, fmt.Errorf("stop: %w", err)
+	}
+
+	columnCount, err := toInt64(params[2])
+	if err != nil {
+		return nil, fmt.Errorf("column_count: %w", err)
 	}
 
 	// Get schema
@@ -322,14 +345,14 @@ func (f *generateRangeFunc) Execute(ctx context.Context, params []interface{}, o
 	defer builder.Release()
 
 	// Generate rows
-	for i := int64(start); i <= int64(stop); i++ {
+	for i := start; i <= stop; i++ {
 		for col := 0; col < int(columnCount); col++ {
 			// Each column gets row_index * (col + 1)
 			builder.Field(col).(*array.Int64Builder).Append(i * int64(col+1))
 		}
 	}
 
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 
-	return array.NewRecordReader(schema, []arrow.Record{record})
+	return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 }

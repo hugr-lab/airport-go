@@ -3,8 +3,8 @@ package catalog
 import (
 	"context"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
 // staticCatalog is an immutable catalog implementation built from CatalogBuilder.
@@ -22,13 +22,14 @@ func NewStaticCatalog() *staticCatalog {
 
 // AddSchema adds a schema to the static catalog.
 // This is used during catalog building.
-func (c *staticCatalog) AddSchema(name, comment string, tables map[string]*StaticTable, scalarFuncs []ScalarFunction, tableFuncs []TableFunction) {
+func (c *staticCatalog) AddSchema(name, comment string, tables map[string]*StaticTable, scalarFuncs []ScalarFunction, tableFuncs []TableFunction, tableFuncsInOut []TableFunctionInOut) {
 	c.schemas[name] = &staticSchema{
-		name:        name,
-		comment:     comment,
-		tables:      tables,
-		scalarFuncs: scalarFuncs,
-		tableFuncs:  tableFuncs,
+		name:            name,
+		comment:         comment,
+		tables:          tables,
+		scalarFuncs:     scalarFuncs,
+		tableFuncs:      tableFuncs,
+		tableFuncsInOut: tableFuncsInOut,
 	}
 }
 
@@ -63,11 +64,12 @@ func (c *staticCatalog) Schema(ctx context.Context, name string) (Schema, error)
 
 // staticSchema is an immutable schema implementation.
 type staticSchema struct {
-	name        string
-	comment     string
-	tables      map[string]*StaticTable
-	scalarFuncs []ScalarFunction
-	tableFuncs  []TableFunction
+	name            string
+	comment         string
+	tables          map[string]*StaticTable
+	scalarFuncs     []ScalarFunction
+	tableFuncs      []TableFunction
+	tableFuncsInOut []TableFunctionInOut
 }
 
 // Name implements Schema interface.
@@ -106,6 +108,11 @@ func (s *staticSchema) ScalarFunctions(ctx context.Context) ([]ScalarFunction, e
 // TableFunctions implements Schema interface.
 func (s *staticSchema) TableFunctions(ctx context.Context) ([]TableFunction, error) {
 	return s.tableFuncs, nil
+}
+
+// TableFunctionsInOut implements Schema interface.
+func (s *staticSchema) TableFunctionsInOut(ctx context.Context) ([]TableFunctionInOut, error) {
+	return s.tableFuncsInOut, nil
 }
 
 // StaticTable is an immutable table implementation.

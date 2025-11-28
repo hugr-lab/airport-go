@@ -7,15 +7,16 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go"
 	"github.com/hugr-lab/airport-go/catalog"
@@ -40,11 +41,13 @@ func newTestServer(t *testing.T, cat catalog.Catalog, auth airport.Authenticator
 		t.Fatalf("Failed to create listener: %v", err)
 	}
 
-	// Configure server
+	// Configure server with debug logging for tests
+	debugLevel := slog.LevelDebug
 	config := airport.ServerConfig{
-		Catalog: cat,
-		Auth:    auth,
-		Address: lis.Addr().String(), // Pass server address for FlightEndpoint locations
+		Catalog:  cat,
+		Auth:     auth,
+		Address:  lis.Addr().String(), // Pass server address for FlightEndpoint locations
+		LogLevel: &debugLevel,
 	}
 
 	opts := airport.ServerOptions(config)
@@ -105,6 +108,7 @@ func openDuckDB(t *testing.T) *sql.DB {
 
 // connectToFlightServer attaches a Flight server to DuckDB.
 // Returns the attachment name for use in queries.
+//nolint:unparam
 func connectToFlightServer(t *testing.T, db *sql.DB, address string, token string) string {
 	t.Helper()
 
@@ -237,7 +241,7 @@ func testAuthHandler() airport.Authenticator {
 }
 
 // buildTestRecord creates an Arrow record from test data.
-func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
+func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
 
@@ -284,7 +288,7 @@ func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
 		}
 	}
 
-	return builder.NewRecord()
+	return builder.NewRecordBatch()
 }
 
 // makeScanFunc creates a ScanFunc from in-memory data.
@@ -292,6 +296,6 @@ func makeScanFunc(schema *arrow.Schema, data [][]interface{}) catalog.ScanFunc {
 	return func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 		record := buildTestRecord(schema, data)
 		defer record.Release()
-		return array.NewRecordReader(schema, []arrow.Record{record})
+		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 }

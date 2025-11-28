@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/flight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

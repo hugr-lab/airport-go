@@ -7,12 +7,13 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
@@ -33,9 +34,11 @@ func main() {
 		log.Fatalf("Failed to load TLS credentials: %v", err)
 	}
 
-	// Configure server with TLS
+	// Configure server with TLS and debug logging
+	debugLevel := slog.LevelDebug
 	config := airport.ServerConfig{
-		Catalog: cat,
+		Catalog:  cat,
+		LogLevel: &debugLevel,
 	}
 
 	// Create gRPC server with TLS
@@ -114,14 +117,14 @@ func createSampleCatalog() (catalog.Catalog, error) {
 			Schema:  schema,
 			ScanFunc: func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 				record := buildRecord(schema, data)
-				return array.NewRecordReader(schema, []arrow.Record{record})
+				return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 			},
 		}).
 		Build()
 }
 
 // buildRecord creates an Arrow record from test data.
-func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
+func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
 
@@ -130,5 +133,5 @@ func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.Record {
 		builder.Field(1).(*array.StringBuilder).Append(row[1].(string))
 	}
 
-	return builder.NewRecord()
+	return builder.NewRecordBatch()
 }

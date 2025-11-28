@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -65,6 +65,10 @@ func (m *mockSchema) TableFunctions(ctx context.Context) ([]catalog.TableFunctio
 	return nil, nil
 }
 
+func (m *mockSchema) TableFunctionsInOut(ctx context.Context) ([]catalog.TableFunctionInOut, error) {
+	return nil, nil
+}
+
 // mockTable for testing
 type mockTable struct {
 	name   string
@@ -86,9 +90,9 @@ func (m *mockTable) ArrowSchema() *arrow.Schema {
 func (m *mockTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, m.schema)
 	defer builder.Release()
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
-	return array.NewRecordReader(m.schema, []arrow.Record{record})
+	return array.NewRecordReader(m.schema, []arrow.RecordBatch{record})
 }
 
 // TestSerializeCatalog tests catalog metadata serialization.

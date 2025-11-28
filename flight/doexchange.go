@@ -1,0 +1,553 @@
+package flight
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+
+	"github.com/hugr-lab/airport-go/catalog"
+	"github.com/hugr-lab/airport-go/internal/msgpack"
+)
+
+// DoExchange implements bidirectional streaming for function execution.
+// This is used by DuckDB Airport extension to execute scalar and table functions.
+//
+// Protocol:
+// - Client sends batches of input data via stream
+// - Server executes function on input data
+// - Server sends back result batches via stream
+//
+// For scalar functions, the implementation uses a pipeline with 3 stages running concurrently:
+// 1. Reader goroutine: Reads input records from client stream
+// 2. Processor goroutine: Executes scalar function on input records
+// 3. Writer goroutine: Sends output records back to client stream
+//
+// For table functions (in/out), the function processes the entire input stream
+// and returns an output RecordReader.
+//
+// Headers:
+// - airport-operation: "scalar_function" or "table_function"
+// - return-chunks: "1"
+//
+// References:
+// - Scalar functions: https://airport.query.farm/scalar_functions.html
+// - Table functions: https://airport.query.farm/table_returning_functions.html
+func (s *Server) DoExchange(stream flight.FlightService_DoExchangeServer) error {
+	ctx := stream.Context()
+
+	// Extract metadata from gRPC headers
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Errorf(codes.InvalidArgument, "missing metadata")
+	}
+
+	// Check for required headers
+	operation := md.Get("airport-operation")
+	if len(operation) == 0 {
+		return status.Errorf(codes.InvalidArgument, "missing airport-operation header")
+	}
+
+	// Support scalar_function, table_function, and table_function_in_out operations
+	opType := operation[0]
+	if opType != "scalar_function" && opType != "table_function" && opType != "table_function_in_out" {
+		return status.Errorf(codes.InvalidArgument, "invalid airport-operation: %s (expected scalar_function, table_function, or table_function_in_out)", opType)
+	}
+
+	returnChunks := md.Get("return-chunks")
+	if len(returnChunks) == 0 || returnChunks[0] != "1" {
+		return status.Errorf(codes.InvalidArgument, "missing or invalid return-chunks header")
+	}
+
+	// Get the function descriptor from gRPC metadata
+	flightPath := md.Get("airport-flight-path")
+	if len(flightPath) == 0 {
+		return status.Errorf(codes.InvalidArgument, "missing airport-flight-path in metadata")
+	}
+
+	// Parse the flight path (format: "schema/function")
+	pathParts := strings.Split(flightPath[0], "/")
+	if len(pathParts) != 2 {
+		return status.Errorf(codes.InvalidArgument, "invalid flight path format: %s", flightPath[0])
+	}
+
+	schemaName := pathParts[0]
+	functionName := pathParts[1]
+
+	s.logger.Debug("DoExchange function execution requested",
+		"operation", opType,
+		"return_chunks", returnChunks[0],
+		"schema", schemaName,
+		"function", functionName,
+	)
+
+	// Route to appropriate handler based on operation type
+	switch opType {
+	case "scalar_function":
+		return s.handleScalarFunction(ctx, stream, schemaName, functionName)
+	case "table_function", "table_function_in_out":
+		// Both table functions and in/out table functions use the same handler
+		// The handler detects the function type and handles accordingly
+		return s.handleTableFunction(ctx, stream, schemaName, functionName)
+	default:
+		return status.Errorf(codes.InvalidArgument, "unsupported operation: %s", opType)
+	}
+}
+
+// handleScalarFunction processes scalar function execution via DoExchange.
+func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightService_DoExchangeServer, schemaName, functionName string) error {
+	// Look up schema
+	schema, err := s.catalog.Schema(ctx, schemaName)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get schema: %v", err)
+	}
+	if schema == nil {
+		return status.Errorf(codes.NotFound, "schema not found: %s", schemaName)
+	}
+
+	// Get scalar functions
+	functions, err := schema.ScalarFunctions(ctx)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get scalar functions: %v", err)
+	}
+
+	// Find the requested function
+	var targetFunc catalog.ScalarFunction
+	for _, fn := range functions {
+		if fn.Name() == functionName {
+			targetFunc = fn
+			break
+		}
+	}
+
+	if targetFunc == nil {
+		return status.Errorf(codes.NotFound, "scalar function not found: %s.%s", schemaName, functionName)
+	}
+
+	// Get the output schema from the function signature
+	functionSignature := targetFunc.Signature()
+	outputSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "result", Type: functionSignature.ReturnType},
+	}, nil)
+
+	s.logger.Debug("Scalar function output schema",
+		"return_type", functionSignature.ReturnType.String(),
+	)
+
+	// read input schema message
+	msg, err := stream.Recv()
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to receive schema: %v", err)
+	}
+
+	s.logger.Debug("Received input schema for scalar function",
+		"schema", msg,
+	)
+
+	// Get a record reader for input data
+	reader, err := flight.NewRecordReader(stream, ipc.WithAllocator(s.allocator))
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to create record reader: %v", err)
+	}
+	defer reader.Release()
+	inputSchema := reader.Schema()
+
+	s.logger.Debug("Input schema for scalar function",
+		"schema", inputSchema,
+	)
+
+	// Create a record writer for output data
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	defer writer.Close()
+
+	if err := writer.Begin(); err != nil {
+		return status.Errorf(codes.Internal, "failed to send output schema: %v", err)
+	}
+
+	// Pipeline channels
+	inputCh := make(chan arrow.RecordBatch, 1)
+	processedCh := make(chan arrow.RecordBatch, 1)
+
+	// Error group for managing goroutines
+	eg, ctx := errgroup.WithContext(ctx)
+
+	// Read data - run in separate goroutine not within errgroup to send errors to the client properly
+	// The reader goroutine will close inputCh when done or stops when others send error status to
+	// the client and connection will be closed.
+	go func() error {
+		defer close(inputCh)
+
+		for reader.Next() {
+			record := reader.RecordBatch()
+			record.Retain() // Retain for passing to next stage
+
+			s.logger.Debug("Received input batch",
+				"num_rows", record.NumRows(),
+				"num_cols", record.NumCols(),
+			)
+
+			select {
+			case inputCh <- record:
+			case <-ctx.Done():
+				record.Release()
+				return ctx.Err()
+			}
+		}
+		if err := reader.Err(); err != nil {
+			return status.Errorf(codes.Internal, "error reading input: %v", err)
+		}
+		return nil
+	}()
+
+	// Process data
+	eg.Go(func() error {
+		defer close(processedCh)
+		batchCount := 0
+		for in := range inputCh {
+			batchCount++
+
+			s.logger.Debug("Processing scalar function batch",
+				"batch", batchCount,
+				"rows", in.NumRows(),
+				"columns", in.NumCols(),
+			)
+
+			// Save input row count before releasing
+			inLen := in.NumRows()
+
+			// Execute the scalar function (returns arrow.Array)
+			res, err := targetFunc.Execute(ctx, in)
+			in.Release()
+
+			if err != nil {
+				s.logger.Error("Function execution failed",
+					"function", functionName,
+					"batch", batchCount,
+					"error", err,
+				)
+				return err
+			}
+
+			// Check for nil result
+			if res == nil {
+				return fmt.Errorf("function returned nil array")
+			}
+
+			// Validate output has same number of rows as input
+			if res.Len() != int(inLen) {
+				res.Release()
+				return fmt.Errorf("output rows must match input rows, expected %d got %d", inLen, res.Len())
+			}
+
+			// Validate output array type matches function signature return type
+			if !arrow.TypeEqual(res.DataType(), functionSignature.ReturnType) {
+				actualType := res.DataType()
+				res.Release()
+				return fmt.Errorf("output array type mismatch: expected %s, got %s",
+					functionSignature.ReturnType, actualType)
+			}
+
+			// Create RecordBatch with "result" field name
+			out := array.NewRecordBatch(outputSchema, []arrow.Array{res}, inLen)
+			res.Release() // RecordBatch retains the array
+
+			// Send to writer stage
+			select {
+			case processedCh <- out:
+			case <-ctx.Done():
+				out.Release()
+				return ctx.Err()
+			}
+		}
+
+		s.logger.Debug("Processor completed")
+		return nil
+	})
+
+	// Write data
+	eg.Go(func() error {
+		batchCount := 0
+		for outputRecord := range processedCh {
+			batchCount++
+
+			if err := writer.Write(outputRecord); err != nil {
+				outputRecord.Release()
+				return fmt.Errorf("failed to write output batch: %w", err)
+			}
+
+			s.logger.Debug("Sent scalar function result",
+				"batch", batchCount,
+				"output_rows", outputRecord.NumRows(),
+			)
+
+			outputRecord.Release()
+		}
+
+		s.logger.Debug("Writer completed")
+		return nil
+	})
+
+	// Wait for all stages to complete
+	// Convert any error to gRPC status error here (only once)
+	if err := eg.Wait(); err != nil {
+		s.logger.Error("DoExchange pipeline failed",
+			"function", functionName,
+			"error", err,
+		)
+		return status.Errorf(codes.Internal, "scalar function `%s.%s` execution failed: %v", schemaName, functionName, err)
+	}
+
+	s.logger.Debug("DoExchange completed",
+		"function", functionName,
+	)
+
+	return nil
+}
+
+// handleTableFunction processes table function execution via DoExchange.
+// Table functions accept row sets as input and return transformed rows.
+func (s *Server) handleTableFunction(ctx context.Context, stream flight.FlightService_DoExchangeServer, schemaName, functionName string) error {
+	s.logger.Debug("Table function execution requested",
+		"schema", schemaName,
+		"function", functionName,
+	)
+
+	// Look up schema
+	schema, err := s.catalog.Schema(ctx, schemaName)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get schema: %v", err)
+	}
+	if schema == nil {
+		return status.Errorf(codes.NotFound, "schema not found: %s", schemaName)
+	}
+
+	// Get table functions with in/out support
+	functions, err := schema.TableFunctionsInOut(ctx)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get table functions: %v", err)
+	}
+
+	// Find the requested function
+	var targetFunc catalog.TableFunctionInOut
+	for _, fn := range functions {
+		if fn.Name() == functionName {
+			targetFunc = fn
+			break
+		}
+	}
+
+	if targetFunc == nil {
+		return status.Errorf(codes.NotFound, "table function not found: %s.%s", schemaName, functionName)
+	}
+
+	s.logger.Debug("Found table function",
+		"function", functionName,
+	)
+
+	// Read the first message which contains the FlightDescriptor and parameters
+	msg, err := stream.Recv()
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to receive initial message: %v", err)
+	}
+
+	s.logger.Debug("Received initial message for table function",
+		"message", msg,
+		"has_app_metadata", msg.AppMetadata != nil,
+		"app_metadata_len", len(msg.AppMetadata),
+	)
+
+	// Read the second message which contains parameters (msgpack-encoded)
+	// According to Airport spec, parameters are sent as an initial metadata message
+	paramMsg, err := stream.Recv()
+	if err != nil {
+		s.logger.Warn("Failed to receive parameter message", "error", err)
+		return status.Errorf(codes.Internal, "failed to receive parameter message: %v", err)
+	}
+
+	s.logger.Debug("Received parameter message",
+		"has_app_metadata", paramMsg.AppMetadata != nil,
+		"app_metadata_len", len(paramMsg.AppMetadata),
+		"first_bytes", fmt.Sprintf("%x", paramMsg.AppMetadata[:min(20, len(paramMsg.AppMetadata))]),
+	)
+
+	// The app_metadata contains msgpack-encoded parameters
+	var params []any
+	if len(paramMsg.AppMetadata) > 0 {
+		// First decode as a generic map to see structure
+		var paramMap map[string]interface{}
+		if err := msgpack.Decode(paramMsg.AppMetadata, &paramMap); err != nil {
+			s.logger.Warn("Failed to decode parameters as map",
+				"error", err,
+				"metadata_len", len(paramMsg.AppMetadata),
+			)
+			params = []any{}
+		} else {
+			// Log map keys for debugging
+			mapKeys := make([]string, 0, len(paramMap))
+			for k := range paramMap {
+				mapKeys = append(mapKeys, k)
+			}
+			s.logger.Debug("Decoded parameter map",
+				"keys", mapKeys,
+			)
+
+			// Extract the parameters array
+			if paramsVal, ok := paramMap["parameters"]; ok {
+				s.logger.Debug("Parameters field found",
+					"type", fmt.Sprintf("%T", paramsVal),
+					"value_len", len(fmt.Sprintf("%v", paramsVal)),
+				)
+
+				// The parameters might be base64-encoded or raw bytes
+				if paramsBytes, ok := paramsVal.([]byte); ok {
+					s.logger.Debug("Parameters is bytes, attempting msgpack decode",
+						"len", len(paramsBytes),
+					)
+					// Try to decode as msgpack array
+					var paramArray []interface{}
+					if err := msgpack.Decode(paramsBytes, &paramArray); err != nil {
+						s.logger.Warn("Failed to decode parameters bytes as msgpack array", "error", err)
+						params = []any{}
+					} else {
+						params = paramArray
+						s.logger.Debug("Decoded parameters from bytes",
+							"param_count", len(params),
+							"params", params,
+						)
+					}
+				} else if paramsArray, ok := paramsVal.([]interface{}); ok {
+					params = paramsArray
+					s.logger.Debug("Extracted parameters array",
+						"param_count", len(params),
+						"params", params,
+					)
+				} else if paramsStr, ok := paramsVal.(string); ok {
+					// Parameters is a string - likely Arrow IPC-encoded RecordBatch
+					s.logger.Debug("Parameters is string, treating as Arrow IPC",
+						"len", len(paramsStr),
+					)
+					paramsBytes := []byte(paramsStr)
+					paramReader, err := ipc.NewReader(bytes.NewReader(paramsBytes))
+					if err != nil {
+						s.logger.Warn("Failed to create IPC reader from string", "error", err)
+						params = []any{}
+					} else {
+						defer paramReader.Release()
+						if paramReader.Next() {
+							paramRecord := paramReader.RecordBatch()
+							params = make([]any, paramRecord.NumCols())
+							for i := 0; i < int(paramRecord.NumCols()); i++ {
+								col := paramRecord.Column(i)
+								if col.Len() > 0 {
+									params[i] = extractScalarValue(col, 0)
+								} else {
+									params[i] = nil
+								}
+							}
+							s.logger.Debug("Decoded parameters from Arrow IPC string",
+								"param_count", len(params),
+								"params", params,
+							)
+						} else {
+							params = []any{}
+						}
+					}
+				} else {
+					s.logger.Warn("Parameters field has unexpected type",
+						"type", fmt.Sprintf("%T", paramsVal),
+					)
+					params = []any{}
+				}
+			} else {
+				s.logger.Warn("No 'parameters' field in map")
+				params = []any{}
+			}
+		}
+	} else {
+		params = []any{}
+	}
+
+	// Create input RecordReader from stream
+	inputReader, err := flight.NewRecordReader(stream, ipc.WithAllocator(s.allocator))
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to create input record reader: %v", err)
+	}
+	defer inputReader.Release()
+
+	inputSchema := inputReader.Schema()
+	s.logger.Debug("Input schema for table function",
+		"schema", inputSchema,
+	)
+
+	// Get output schema from function
+	outputSchema, err := targetFunc.SchemaForParameters(ctx, params, inputSchema)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to get output schema: %v", err)
+	}
+
+	s.logger.Debug("Output schema for table function",
+		"schema", outputSchema,
+	)
+
+	// Create writer for output data and send schema BEFORE executing function
+	// This allows the client to start sending input data
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	defer writer.Close()
+
+	if err := writer.Begin(); err != nil {
+		return status.Errorf(codes.Internal, "failed to send output schema: %v", err)
+	}
+
+	// Execute the table function
+	// The function will read from inputReader which streams from the client
+	opts := &catalog.ScanOptions{} // TODO: Pass actual scan options if needed
+	outputReader, err := targetFunc.Execute(ctx, params, inputReader, opts)
+	if err != nil {
+		return status.Errorf(codes.Internal, "table function execution failed: %v", err)
+	}
+	defer outputReader.Release()
+
+	// Stream output batches to client
+	batchCount := 0
+	for outputReader.Next() {
+		batchCount++
+		batch := outputReader.RecordBatch()
+
+		s.logger.Debug("Sending table function output batch",
+			"batch", batchCount,
+			"rows", batch.NumRows(),
+		)
+
+		if err := writer.Write(batch); err != nil {
+			return status.Errorf(codes.Internal, "failed to write output batch: %v", err)
+		}
+	}
+
+	if err := outputReader.Err(); err != nil {
+		return status.Errorf(codes.Internal, "error reading output: %v", err)
+	}
+
+	s.logger.Debug("Table function execution completed",
+		"function", functionName,
+		"batches_sent", batchCount,
+	)
+
+	return nil
+}

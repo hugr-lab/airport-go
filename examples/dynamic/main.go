@@ -7,13 +7,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
 	"github.com/hugr-lab/airport-go"
@@ -160,6 +161,11 @@ func (s *DynamicSchema) TableFunctions(ctx context.Context) ([]catalog.TableFunc
 	return nil, nil
 }
 
+// TableFunctionsInOut implements catalog.Schema.
+func (s *DynamicSchema) TableFunctionsInOut(ctx context.Context) ([]catalog.TableFunctionInOut, error) {
+	return nil, nil
+}
+
 // LiveTable demonstrates a table with data that changes over time.
 type LiveTable struct {
 	name    string
@@ -200,10 +206,10 @@ func (t *LiveTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.
 		}
 	}
 
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
-	return array.NewRecordReader(t.schema, []arrow.Record{record})
+	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }
 
 func main() {
@@ -229,8 +235,8 @@ func main() {
 			// Return current metrics
 			elapsed := time.Since(startTime).Seconds()
 			return [][]interface{}{
-				{int64(time.Now().Unix()), "uptime_seconds", int64(elapsed)},
-				{int64(time.Now().Unix()), "request_count", int64(100)},
+				{time.Now().Unix(), "uptime_seconds", int64(elapsed)},
+				{time.Now().Unix(), "request_count", int64(100)},
 			}
 		},
 	}
@@ -262,9 +268,11 @@ func main() {
 	adminSchema.AddTable(adminTable)
 	cat.AddSchema("admin", adminSchema)
 
-	// Create gRPC server with authentication
+	// Create gRPC server with authentication and debug logging
+	debugLevel := slog.LevelDebug
 	config := airport.ServerConfig{
-		Catalog: cat,
+		Catalog:  cat,
+		LogLevel: &debugLevel,
 		Auth: airport.BearerAuth(func(token string) (string, error) {
 			// Simple token validation
 			validTokens := map[string]string{

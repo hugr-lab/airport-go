@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/auth"
 	"github.com/hugr-lab/airport-go/catalog"
@@ -26,7 +26,14 @@ type ServerConfig struct {
 
 	// Logger for internal logging.
 	// OPTIONAL: Uses slog.Default() if nil.
+	// Note: If LogLevel is specified, a new logger will be created with that level.
 	Logger *slog.Logger
+
+	// LogLevel sets the logging level.
+	// OPTIONAL: If nil, uses Info level.
+	// Valid values: slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError
+	// If Logger is also provided, LogLevel is ignored (use pre-configured logger).
+	LogLevel *slog.Level
 
 	// MaxMessageSize sets maximum gRPC message size in bytes.
 	// OPTIONAL: If 0, uses gRPC default (4MB).

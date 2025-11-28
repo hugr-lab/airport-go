@@ -88,9 +88,9 @@ action := &flight.Action{
 import (
     "github.com/paulmach/orb"
     "github.com/paulmach/orb/encoding/wkb"
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/array"
-    "github.com/apache/arrow/go/v18/arrow/memory"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 // Define schema with geometry extension

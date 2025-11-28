@@ -3,7 +3,7 @@ package airport
 import (
 	"fmt"
 
-	"github.com/apache/arrow/go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -133,7 +133,7 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 		}
 
 		// Add schema to catalog
-		cat.AddSchema(sb.name, sb.comment, tables, sb.scalarFuncs, sb.tableFuncs)
+		cat.AddSchema(sb.name, sb.comment, tables, sb.scalarFuncs, sb.tableFuncs, sb.tableFuncsInOut)
 	}
 
 	return cat, nil
@@ -147,12 +147,13 @@ type SchemaBuilder struct {
 
 // schemaBuilder is the internal schema builder implementation.
 type schemaBuilder struct {
-	name           string
-	comment        string
-	tables         []SimpleTableDef
-	scalarFuncs    []catalog.ScalarFunction
-	tableFuncs     []catalog.TableFunction
-	catalogBuilder *CatalogBuilder
+	name            string
+	comment         string
+	tables          []SimpleTableDef
+	scalarFuncs     []catalog.ScalarFunction
+	tableFuncs      []catalog.TableFunction
+	tableFuncsInOut []catalog.TableFunctionInOut
+	catalogBuilder  *CatalogBuilder
 }
 
 // Comment sets optional schema documentation.
@@ -200,6 +201,18 @@ func (sb *SchemaBuilder) ScalarFunc(fn catalog.ScalarFunction) *SchemaBuilder {
 //	schema.TableFunc(&ReadParquetFunc{})
 func (sb *SchemaBuilder) TableFunc(fn catalog.TableFunction) *SchemaBuilder {
 	sb.builder.tableFuncs = append(sb.builder.tableFuncs, fn)
+	return sb
+}
+
+// TableFuncInOut registers a table function that accepts row sets as input.
+// Returns self for method chaining.
+// Function name MUST be unique within schema.
+//
+// Example:
+//
+//	schema.TableFuncInOut(&FilterRowsFunc{})
+func (sb *SchemaBuilder) TableFuncInOut(fn catalog.TableFunctionInOut) *SchemaBuilder {
+	sb.builder.tableFuncsInOut = append(sb.builder.tableFuncsInOut, fn)
 	return sb
 }
 

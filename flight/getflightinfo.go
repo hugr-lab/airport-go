@@ -3,7 +3,7 @@ package flight
 import (
 	"context"
 
-	"github.com/apache/arrow/go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/flight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,7 +17,7 @@ import (
 //   - Ticket: Opaque byte slice encoding schema/table names
 //   - Endpoints: Single endpoint with the ticket
 func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
-	s.logger.Info("GetFlightInfo called",
+	s.logger.Debug("GetFlightInfo called",
 		"type", desc.GetType(),
 		"path_length", len(desc.GetPath()),
 	)
@@ -32,10 +32,10 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 		return nil, status.Error(codes.InvalidArgument, "path must contain exactly 2 elements: [schema_name, table_name]")
 	}
 
-	schemaName := string(path[0])
-	tableName := string(path[1])
+	schemaName := path[0]
+	tableName := path[1]
 
-	s.logger.Info("GetFlightInfo request",
+	s.logger.Debug("GetFlightInfo request",
 		"schema", schemaName,
 		"table", tableName,
 	)
@@ -90,7 +90,7 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 
 	// Create flight info
 	flightInfo := &flight.FlightInfo{
-		Schema: flight.SerializeSchema(arrowSchema, s.allocator),
+		Schema:           flight.SerializeSchema(arrowSchema, s.allocator),
 		FlightDescriptor: desc,
 		Endpoint: []*flight.FlightEndpoint{
 			{
@@ -103,7 +103,7 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 		TotalBytes:   -1, // Unknown until scan
 	}
 
-	s.logger.Info("GetFlightInfo successful",
+	s.logger.Debug("GetFlightInfo successful",
 		"schema", schemaName,
 		"table", tableName,
 		"num_fields", arrowSchema.NumFields(),

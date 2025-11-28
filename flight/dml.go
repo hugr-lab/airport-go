@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/apache/arrow/go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/flight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -142,7 +142,10 @@ func (s *Server) handleUpdate(descriptor *UpdateDescriptor, stream flight.Flight
 }
 
 // validateSchemaCompatibility checks if a RecordBatch schema matches the table schema.
+// validateSchemaCompatibility validates that a batch schema is compatible with a table schema.
 // This is used to validate INSERT and UPDATE operations.
+// Currently unused but kept for future implementation.
+// nolint:unused
 func validateSchemaCompatibility(batchSchema, tableSchema interface{}) error {
 	// Placeholder - would implement actual schema validation:
 	// 1. Check all batch columns exist in table

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/paulmach/orb"
 )
 
@@ -354,7 +354,7 @@ func TestGeometryInArrowRecord(t *testing.T) {
 	builder.Field(2).(*array.BinaryBuilder).Append(wkbBytes)
 
 	// Create record
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
 	// Verify record

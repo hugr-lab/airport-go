@@ -28,7 +28,7 @@ Repository root is the airport package (`github.com/hugr-lab/airport-go`):
 
 - [X] T001 Initialize Go module with `go mod init github.com/hugr-lab/airport-go` in repository root
 - [X] T002 [P] Create directory structure: `catalog/`, `flight/`, `auth/`, `internal/serialize/`, `internal/msgpack/`, `internal/recovery/`, `examples/basic/`, `testutil/`, `tests/unit/`, `tests/integration/`, `tests/benchmarks/`
-- [X] T003 [P] Add dependencies to go.mod: `github.com/apache/arrow/go/v18/arrow`, `google.golang.org/grpc`, `github.com/klauspost/compress/zstd`, `github.com/vmihailenco/msgpack/v5`, `github.com/grpc-ecosystem/go-grpc-middleware/v2`
+- [X] T003 [P] Add dependencies to go.mod: `github.com/apache/arrow-go/v18/arrow`, `google.golang.org/grpc`, `github.com/klauspost/compress/zstd`, `github.com/vmihailenco/msgpack/v5`, `github.com/grpc-ecosystem/go-grpc-middleware/v2`
 - [X] T004 [P] Create doc.go in repository root with package documentation
 - [X] T005 [P] Configure golangci-lint with .golangci.yml in repository root
 - [X] T006 [P] Create README.md with quickstart example (adapt from specs/001-001-flight-server/quickstart.md)

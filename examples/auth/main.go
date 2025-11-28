@@ -6,11 +6,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
 	"github.com/hugr-lab/airport-go"
@@ -19,10 +20,10 @@ import (
 
 // Simulated user database for demo purposes
 var validTokens = map[string]string{
-	"secret-admin-token":  "admin",
-	"secret-user1-token":  "user1",
-	"secret-user2-token":  "user2",
-	"secret-guest-token":  "guest",
+	"secret-admin-token": "admin",
+	"secret-user1-token": "user1",
+	"secret-user2-token": "user2",
+	"secret-guest-token": "guest",
 }
 
 // validateToken checks if a bearer token is valid and returns user identity.
@@ -53,10 +54,10 @@ func main() {
 		builder.Field(1).(*array.StringBuilder).AppendValues([]string{"Alice", "Bob", "Charlie"}, nil)
 		builder.Field(2).(*array.StringBuilder).AppendValues([]string{"alice@example.com", "bob@example.com", "charlie@example.com"}, nil)
 
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		defer record.Release()
 
-		return array.NewRecordReader(userSchema, []arrow.Record{record})
+		return array.NewRecordReader(userSchema, []arrow.RecordBatch{record})
 	}
 
 	// Build catalog with authentication-aware table
@@ -74,10 +75,12 @@ func main() {
 		log.Fatalf("Failed to build catalog: %v", err)
 	}
 
-	// Create server configuration with bearer token authentication
+	// Create server configuration with bearer token authentication and debug logging
+	debugLevel := slog.LevelDebug
 	config := airport.ServerConfig{
-		Catalog: cat,
-		Auth:    airport.BearerAuth(validateToken),
+		Catalog:  cat,
+		Auth:     airport.BearerAuth(validateToken),
+		LogLevel: &debugLevel,
 	}
 
 	// Create gRPC server with authentication interceptors

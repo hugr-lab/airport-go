@@ -192,16 +192,18 @@ func (f *myFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Record,
 
 2. **Table Functions**: Fully supported. Can be called like regular tables in FROM clauses.
 
-3. **Parameter Types**: Parameters come as JSON-decoded values:
-   - Numbers → `float64`
+3. **Parameter Types**: Parameters are deserialized from Arrow Record Batches and come as Go types:
+   - Integer types (INT8, INT16, INT32, INT64, UINT8, etc.) → `int64`
+   - Float types (FLOAT32, FLOAT64) → `float64`
    - Strings → `string`
+   - Binary → `[]byte`
    - Booleans → `bool`
-   - Arrays → `[]interface{}`
-   - Objects → `map[string]interface{}`
+
+   Functions should handle both `int64` and `float64` for numeric parameters to be flexible.
 
 ## See Also
 
 - [Catalog Builder API](../../README.md#catalog-builder)
 - [Function Interfaces](../../catalog/function.go)
 - [Integration Tests](../../tests/integration/functions_test.go)
-- [Arrow Go Documentation](https://pkg.go.dev/github.com/apache/arrow/go/v18/arrow)
+- [Arrow Go Documentation](https://pkg.go.dev/github.com/apache/arrow-go/v18/arrow)

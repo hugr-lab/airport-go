@@ -14,7 +14,7 @@
 **Rationale**:
 - Apache Arrow Flight provides `DoAction` RPC method for custom commands (DDL operations)
 - `DoPut` RPC method is designed for streaming data uploads (INSERT operations)
-- Flight Go SDK (`github.com/apache/arrow/go/v18/arrow/flight`) provides `flight.BaseFlightServer` with overridable methods
+- Flight Go SDK (`github.com/apache/arrow-go/v18/arrow/flight`) provides `flight.BaseFlightServer` with overridable methods
 - DuckDB Airport extension uses this exact pattern for DDL/DML operations
 
 **Implementation Pattern**:
@@ -46,7 +46,7 @@ func (s *FlightServer) DoPut(stream flight.FlightService_DoPutServer) error {
 - REST API: Rejected - Arrow Flight is optimized for columnar data transfer, aligns with project goals
 
 **References**:
-- Arrow Flight Go SDK: https://pkg.go.dev/github.com/apache/arrow/go/v18/arrow/flight
+- Arrow Flight Go SDK: https://pkg.go.dev/github.com/apache/arrow-go/v18/arrow/flight
 - DuckDB Airport extension: https://airport.query.farm/
 - Arrow Flight RPC protocol: https://arrow.apache.org/docs/format/Flight.html
 

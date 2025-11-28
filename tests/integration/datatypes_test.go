@@ -3,7 +3,7 @@ package airport_test
 import (
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/wkb"
 
@@ -496,4 +496,3 @@ func hugeintTestCatalog() catalog.Catalog {
 
 	return cat
 }
-

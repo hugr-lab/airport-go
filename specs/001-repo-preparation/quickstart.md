@@ -185,7 +185,7 @@ import (
     "encoding/json"
     "io"
 
-    "github.com/apache/arrow/go/v18/arrow/flight"
+    "github.com/apache/arrow-go/v18/arrow/flight"
     "google.golang.org/grpc/codes"
     "google.golang.org/grpc/status"
 )
@@ -259,7 +259,7 @@ import (
     "context"
     "testing"
 
-    "github.com/apache/arrow/go/v18/arrow/flight"
+    "github.com/apache/arrow-go/v18/arrow/flight"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"
     "google.golang.org/grpc/codes"
@@ -349,7 +349,7 @@ go tool cover -html=coverage.out
 **Memory leak detection**:
 ```go
 // In test files
-import "github.com/apache/arrow/go/v18/arrow/memory"
+import "github.com/apache/arrow-go/v18/arrow/memory"
 
 func TestNoMemoryLeaks(t *testing.T) {
     allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
@@ -438,7 +438,7 @@ After implementing this feature:
 
 ## Resources
 
-- [Apache Arrow Flight Go SDK](https://pkg.go.dev/github.com/apache/arrow/go/v18/arrow/flight)
+- [Apache Arrow Flight Go SDK](https://pkg.go.dev/github.com/apache/arrow-go/v18/arrow/flight)
 - [DuckDB Airport Extension](https://airport.query.farm/)
 - [Go testing](https://go.dev/doc/tutorial/add-a-test)
 - [GitHub Actions for Go](https://github.com/actions/setup-go)

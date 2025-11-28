@@ -17,7 +17,7 @@ go version
 
 # Install airport-go package
 go get github.com/hugr-lab/airport-go@latest
-go get github.com/apache/arrow/go/v18/arrow@latest
+go get github.com/apache/arrow-go/v18/arrow@latest
 ```
 
 ## Complete Example (Under 30 Lines)
@@ -30,9 +30,9 @@ import (
     "log"
     "net"
 
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/array"
-    "github.com/apache/arrow/go/v18/arrow/memory"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow/memory"
     "google.golang.org/grpc"
 
     "github.com/hugr-lab/airport-go"

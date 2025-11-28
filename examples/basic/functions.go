@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -38,7 +38,8 @@ func (f *UppercaseFunc) Signature() catalog.FunctionSignature {
 
 // Execute applies the uppercase transformation to an Arrow record.
 // This processes entire batches at once (vectorized execution).
-func (f *UppercaseFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Record, error) {
+//nolint:unparam
+func (f *UppercaseFunc) Execute(ctx context.Context, input arrow.RecordBatch) (arrow.RecordBatch, error) {
 	if input.NumCols() != 1 {
 		return nil, fmt.Errorf("UPPERCASE expects exactly 1 column, got %d", input.NumCols())
 	}
@@ -73,7 +74,7 @@ func (f *UppercaseFunc) Execute(ctx context.Context, input arrow.Record) (arrow.
 	}, nil)
 
 	// Build output record with the output array
-	return array.NewRecord(outputSchema, []arrow.Array{outputArray}, int64(outputArray.Len())), nil
+	return array.NewRecordBatch(outputSchema, []arrow.Array{outputArray}, int64(outputArray.Len())), nil
 }
 
 // LengthFunc returns the length of strings.
@@ -95,7 +96,8 @@ func (f *LengthFunc) Signature() catalog.FunctionSignature {
 	}
 }
 
-func (f *LengthFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Record, error) {
+//nolint:unparam
+func (f *LengthFunc) Execute(ctx context.Context, input arrow.RecordBatch) (arrow.RecordBatch, error) {
 	if input.NumCols() != 1 {
 		return nil, fmt.Errorf("LENGTH expects exactly 1 column, got %d", input.NumCols())
 	}
@@ -127,5 +129,5 @@ func (f *LengthFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Rec
 		{Name: "length", Type: arrow.PrimitiveTypes.Int64},
 	}, nil)
 
-	return array.NewRecord(outputSchema, []arrow.Array{outputArray}, int64(outputArray.Len())), nil
+	return array.NewRecordBatch(outputSchema, []arrow.Array{outputArray}, int64(outputArray.Len())), nil
 }
