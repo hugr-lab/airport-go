@@ -163,9 +163,8 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to create record reader: %v", err)
 	}
-	defer reader.Release()
-	inputSchema := reader.Schema()
 
+	inputSchema := reader.Schema()
 	s.logger.Debug("Input schema for scalar function",
 		"schema", inputSchema,
 	)
@@ -190,6 +189,7 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 	// the client and connection will be closed.
 	go func() error {
 		defer close(inputCh)
+		defer reader.Release()
 
 		for reader.Next() {
 			record := reader.RecordBatch()
@@ -207,7 +207,7 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 				return ctx.Err()
 			}
 		}
-		if err := reader.Err(); err != nil {
+		if err := reader.Err(); err != nil && !errors.Is(err, io.EOF) {
 			return status.Errorf(codes.Internal, "error reading input: %v", err)
 		}
 		return nil
