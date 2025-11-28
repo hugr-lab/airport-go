@@ -27,13 +27,15 @@ type TicketData struct {
 	// Parameters are serialized as JSON-compatible values
 	FunctionParams []interface{} `json:"function_params,omitempty"`
 
-	// Ts is Unix timestamp in seconds for point-in-time queries (optional)
-	// If both Ts and TsNs are nil, query returns current data
-	Ts *int64 `json:"ts,omitempty"`
+	// TimePointUnit specifies time granularity for time-travel queries (optional)
+	// Valid values: "timestamp", "timestamp_ns", "version", etc.
+	// If empty, query returns current data
+	TimePointUnit string `json:"time_point_unit,omitempty"`
 
-	// TsNs is Unix timestamp in nanoseconds for point-in-time queries (optional)
-	// At most one of Ts or TsNs can be set
-	TsNs *int64 `json:"ts_ns,omitempty"`
+	// TimePointValue is the time point value (optional)
+	// Format depends on TimePointUnit (e.g., "2024-01-01 00:00:00", "1704067200")
+	// Only valid when TimePointUnit is set
+	TimePointValue string `json:"time_point_value,omitempty"`
 
 	// Columns to project (optional, nil means all columns)
 	Columns []string `json:"columns,omitempty"`
@@ -93,39 +95,29 @@ func DecodeTicket(ticketBytes []byte) (*TicketData, error) {
 		return nil, fmt.Errorf("function_params only valid with table_function")
 	}
 
-	// Validate timestamp parameters
-	if ticket.Ts != nil && ticket.TsNs != nil {
-		return nil, fmt.Errorf("at most one of ts or ts_ns can be set")
+	// Validate time point parameters
+	if ticket.TimePointUnit != "" && ticket.TimePointValue == "" {
+		return nil, fmt.Errorf("time_point_value must be set when time_point_unit is specified")
 	}
-
-	if ticket.Ts != nil && *ticket.Ts < 0 {
-		return nil, fmt.Errorf("ts must be non-negative, got %d", *ticket.Ts)
-	}
-
-	if ticket.TsNs != nil && *ticket.TsNs < 0 {
-		return nil, fmt.Errorf("ts_ns must be non-negative, got %d", *ticket.TsNs)
+	if ticket.TimePointValue != "" && ticket.TimePointUnit == "" {
+		return nil, fmt.Errorf("time_point_unit must be set when time_point_value is specified")
 	}
 
 	return &ticket, nil
 }
 
 // ToScanOptions converts TicketData to catalog.ScanOptions with time-travel support.
-// This extracts timestamp parameters and converts them to TimePoint for the catalog layer.
+// This extracts time point parameters and converts them to TimePoint for the catalog layer.
 func (td *TicketData) ToScanOptions() *catalog.ScanOptions {
 	opts := &catalog.ScanOptions{
 		Columns: td.Columns,
 	}
 
-	// Convert timestamp parameters to TimePoint
-	if td.Ts != nil {
+	// Convert time point parameters to TimePoint
+	if td.TimePointUnit != "" && td.TimePointValue != "" {
 		opts.TimePoint = &catalog.TimePoint{
-			Unit:  "timestamp",
-			Value: fmt.Sprintf("%d", *td.Ts),
-		}
-	} else if td.TsNs != nil {
-		opts.TimePoint = &catalog.TimePoint{
-			Unit:  "timestamp_ns",
-			Value: fmt.Sprintf("%d", *td.TsNs),
+			Unit:  td.TimePointUnit,
+			Value: td.TimePointValue,
 		}
 	}
 

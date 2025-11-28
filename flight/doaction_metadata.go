@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -298,70 +297,30 @@ func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, str
 
 		// Parse time travel parameters if present
 		if request.Parameters.AtUnit != "" && request.Parameters.AtValue != "" {
-			// Store timestamp based on unit (DuckDB sends "TIMESTAMP" and "VERSION" in uppercase)
-			switch request.Parameters.AtUnit {
-			case "TIMESTAMP", "timestamp":
-				// Parse timestamp string to Unix seconds
-				// Value format could be: "2024-01-01 00:00:00" or Unix epoch string
-				// Try parsing as timestamp string first
-				t, err := time.Parse("2006-01-02 15:04:05", request.Parameters.AtValue)
-				if err == nil {
-					tsVal := t.Unix()
-					ticketData.Ts = &tsVal
-					s.logger.Debug("Added time travel to ticket",
-						"schema", schemaName,
-						"table", tableOrFunctionName,
-						"unit", "timestamp",
-						"value", tsVal,
-						"parsed_from", request.Parameters.AtValue,
-					)
-				} else {
-					// Try parsing as Unix epoch integer
-					var tsVal int64
-					if _, err := fmt.Sscanf(request.Parameters.AtValue, "%d", &tsVal); err != nil {
-						s.logger.Error("Failed to parse timestamp", "at_value", request.Parameters.AtValue, "error", err)
-						return status.Errorf(codes.InvalidArgument, "invalid timestamp value: %v", err)
-					}
-					ticketData.Ts = &tsVal
-					s.logger.Debug("Added time travel to ticket",
-						"schema", schemaName,
-						"table", tableOrFunctionName,
-						"unit", "timestamp",
-						"value", tsVal,
-					)
-				}
-			case "TIMESTAMP_NS", "timestamp_ns":
-				// Parse nanosecond timestamp
-				var tsVal int64
-				if _, err := fmt.Sscanf(request.Parameters.AtValue, "%d", &tsVal); err != nil {
-					s.logger.Error("Failed to parse timestamp_ns", "at_value", request.Parameters.AtValue, "error", err)
-					return status.Errorf(codes.InvalidArgument, "invalid timestamp_ns value: %v", err)
-				}
-				ticketData.TsNs = &tsVal
-				s.logger.Debug("Added time travel to ticket",
-					"schema", schemaName,
-					"table", tableOrFunctionName,
-					"unit", "timestamp_ns",
-					"value", tsVal,
-				)
-			case "VERSION", "version":
-				// Parse version number as Unix seconds
-				var tsVal int64
-				if _, err := fmt.Sscanf(request.Parameters.AtValue, "%d", &tsVal); err != nil {
-					s.logger.Error("Failed to parse version", "at_value", request.Parameters.AtValue, "error", err)
-					return status.Errorf(codes.InvalidArgument, "invalid version value: %v", err)
-				}
-				ticketData.Ts = &tsVal
-				s.logger.Debug("Added time travel to ticket",
-					"schema", schemaName,
-					"table", tableOrFunctionName,
-					"unit", "version",
-					"value", tsVal,
-				)
+			// Store time point directly (DuckDB sends unit like "TIMESTAMP", "VERSION")
+			// Normalize to lowercase for consistency
+			unit := request.Parameters.AtUnit
+			switch unit {
+			case "TIMESTAMP":
+				unit = "timestamp"
+			case "TIMESTAMP_NS":
+				unit = "timestamp_ns"
+			case "VERSION":
+				unit = "version"
 			default:
-				s.logger.Error("Unsupported at_unit", "at_unit", request.Parameters.AtUnit)
-				return status.Errorf(codes.InvalidArgument, "unsupported at_unit: %s", request.Parameters.AtUnit)
+				// Keep other units as-is (lowercase)
+				unit = request.Parameters.AtUnit
 			}
+
+			ticketData.TimePointUnit = unit
+			ticketData.TimePointValue = request.Parameters.AtValue
+
+			s.logger.Debug("Added time travel to ticket",
+				"schema", schemaName,
+				"table", tableOrFunctionName,
+				"unit", unit,
+				"value", request.Parameters.AtValue,
+			)
 		}
 
 		ticket, err = json.Marshal(ticketData)

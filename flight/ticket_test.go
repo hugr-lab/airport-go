@@ -48,48 +48,50 @@ func TestEncodeDecodeTicket(t *testing.T) {
 	}
 }
 
-func TestDecodeTicketWithTimestamp(t *testing.T) {
+func TestDecodeTicketWithTimePoint(t *testing.T) {
 	tests := []struct {
-		name      string
-		json      string
-		wantTs    *int64
-		wantTsNs  *int64
-		wantError bool
+		name          string
+		json          string
+		wantUnit      string
+		wantValue     string
+		wantError     bool
 	}{
 		{
-			name:      "no timestamp",
+			name:      "no time point",
 			json:      `{"schema":"main","table":"users"}`,
-			wantTs:    nil,
-			wantTsNs:  nil,
+			wantUnit:  "",
+			wantValue: "",
 			wantError: false,
 		},
 		{
-			name:      "with ts",
-			json:      `{"schema":"main","table":"users","ts":1704067200}`,
-			wantTs:    int64Ptr(1704067200),
-			wantTsNs:  nil,
+			name:      "with timestamp",
+			json:      `{"schema":"main","table":"users","time_point_unit":"timestamp","time_point_value":"1704067200"}`,
+			wantUnit:  "timestamp",
+			wantValue: "1704067200",
 			wantError: false,
 		},
 		{
-			name:      "with ts_ns",
-			json:      `{"schema":"main","table":"users","ts_ns":1704067200000000000}`,
-			wantTs:    nil,
-			wantTsNs:  int64Ptr(1704067200000000000),
+			name:      "with timestamp_ns",
+			json:      `{"schema":"main","table":"users","time_point_unit":"timestamp_ns","time_point_value":"1704067200000000000"}`,
+			wantUnit:  "timestamp_ns",
+			wantValue: "1704067200000000000",
 			wantError: false,
 		},
 		{
-			name:      "both ts and ts_ns - error",
-			json:      `{"schema":"main","table":"users","ts":1704067200,"ts_ns":1704067200000000000}`,
+			name:      "with version",
+			json:      `{"schema":"main","table":"users","time_point_unit":"version","time_point_value":"42"}`,
+			wantUnit:  "version",
+			wantValue: "42",
+			wantError: false,
+		},
+		{
+			name:      "unit without value - error",
+			json:      `{"schema":"main","table":"users","time_point_unit":"timestamp"}`,
 			wantError: true,
 		},
 		{
-			name:      "negative ts",
-			json:      `{"schema":"main","table":"users","ts":-1}`,
-			wantError: true,
-		},
-		{
-			name:      "negative ts_ns",
-			json:      `{"schema":"main","table":"users","ts_ns":-1}`,
+			name:      "value without unit - error",
+			json:      `{"schema":"main","table":"users","time_point_value":"1704067200"}`,
 			wantError: true,
 		},
 	}
@@ -107,12 +109,12 @@ func TestDecodeTicketWithTimestamp(t *testing.T) {
 				return
 			}
 
-			// Verify timestamp fields
-			if !int64PtrEqual(decoded.Ts, tt.wantTs) {
-				t.Errorf("Ts = %v, want %v", ptrValue(decoded.Ts), ptrValue(tt.wantTs))
+			// Verify time point fields
+			if decoded.TimePointUnit != tt.wantUnit {
+				t.Errorf("TimePointUnit = %v, want %v", decoded.TimePointUnit, tt.wantUnit)
 			}
-			if !int64PtrEqual(decoded.TsNs, tt.wantTsNs) {
-				t.Errorf("TsNs = %v, want %v", ptrValue(decoded.TsNs), ptrValue(tt.wantTsNs))
+			if decoded.TimePointValue != tt.wantValue {
+				t.Errorf("TimePointValue = %v, want %v", decoded.TimePointValue, tt.wantValue)
 			}
 		})
 	}
@@ -135,25 +137,39 @@ func TestToScanOptions(t *testing.T) {
 			wantTimePointNil: true,
 		},
 		{
-			name: "with ts",
+			name: "with timestamp",
 			ticket: TicketData{
-				Schema: "main",
-				Table:  "users",
-				Ts:     int64Ptr(1704067200),
+				Schema:         "main",
+				Table:          "users",
+				TimePointUnit:  "timestamp",
+				TimePointValue: "1704067200",
 			},
 			wantTimeUnit:     "timestamp",
 			wantTimeValue:    "1704067200",
 			wantTimePointNil: false,
 		},
 		{
-			name: "with ts_ns",
+			name: "with timestamp_ns",
 			ticket: TicketData{
-				Schema: "main",
-				Table:  "users",
-				TsNs:   int64Ptr(1704067200000000000),
+				Schema:         "main",
+				Table:          "users",
+				TimePointUnit:  "timestamp_ns",
+				TimePointValue: "1704067200000000000",
 			},
 			wantTimeUnit:     "timestamp_ns",
 			wantTimeValue:    "1704067200000000000",
+			wantTimePointNil: false,
+		},
+		{
+			name: "with version",
+			ticket: TicketData{
+				Schema:         "main",
+				Table:          "users",
+				TimePointUnit:  "version",
+				TimePointValue: "42",
+			},
+			wantTimeUnit:     "version",
+			wantTimeValue:    "42",
 			wantTimePointNil: false,
 		},
 		{
@@ -287,10 +303,11 @@ func TestDecodeTicketValidation(t *testing.T) {
 func TestTicketDataJSON(t *testing.T) {
 	// Test round-trip JSON encoding
 	original := TicketData{
-		Schema:  "main",
-		Table:   "users",
-		Ts:      int64Ptr(1704067200),
-		Columns: []string{"id", "name"},
+		Schema:         "main",
+		Table:          "users",
+		TimePointUnit:  "timestamp",
+		TimePointValue: "1704067200",
+		Columns:        []string{"id", "name"},
 	}
 
 	// Marshal
@@ -312,29 +329,10 @@ func TestTicketDataJSON(t *testing.T) {
 	if decoded.Table != original.Table {
 		t.Errorf("Table = %v, want %v", decoded.Table, original.Table)
 	}
-	if !int64PtrEqual(decoded.Ts, original.Ts) {
-		t.Errorf("Ts = %v, want %v", ptrValue(decoded.Ts), ptrValue(original.Ts))
+	if decoded.TimePointUnit != original.TimePointUnit {
+		t.Errorf("TimePointUnit = %v, want %v", decoded.TimePointUnit, original.TimePointUnit)
 	}
-}
-
-// Helper functions
-func int64Ptr(v int64) *int64 {
-	return &v
-}
-
-func int64PtrEqual(a, b *int64) bool {
-	if a == nil && b == nil {
-		return true
+	if decoded.TimePointValue != original.TimePointValue {
+		t.Errorf("TimePointValue = %v, want %v", decoded.TimePointValue, original.TimePointValue)
 	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func ptrValue(p *int64) interface{} {
-	if p == nil {
-		return nil
-	}
-	return *p
 }
