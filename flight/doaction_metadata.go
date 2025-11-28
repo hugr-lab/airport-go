@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/hugr-lab/airport-go/catalog"
 	"github.com/hugr-lab/airport-go/internal/msgpack"
 )
 
@@ -74,47 +75,54 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 		return status.Errorf(codes.NotFound, "table not found: %s.%s", schemaName, tableOrFunctionName)
 	}
 
-	// Get table schema
-	tableSchema := table.ArrowSchema()
-	if tableSchema == nil {
-		return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", schemaName, tableOrFunctionName)
+	// Determine the schema for this table (possibly at a specific time point)
+	var tableSchema *arrow.Schema
+	var timePoint *catalog.TimePoint
+
+	// Parse time travel parameters if present
+	if request.AtUnit != "" && request.AtValue != "" {
+		timePoint = &catalog.TimePoint{
+			Unit:  request.AtUnit,
+			Value: request.AtValue,
+		}
+
+		s.logger.Debug("Time travel request",
+			"unit", timePoint.Unit,
+			"value", timePoint.Value,
+		)
 	}
 
-	// Parse time travel parameters and create ticket
-	var ts *int64
-	var tsNs *int64
-	if request.AtUnit != "" && request.AtValue != "" {
-		switch request.AtUnit {
-		case "TIMESTAMP":
-			// Parse timestamp string to Unix seconds
-			// Value format: "2024-01-01 00:00:00"
-			t, err := time.Parse("2006-01-02 15:04:05", request.AtValue)
-			if err == nil {
-				tsVal := t.Unix()
-				ts = &tsVal
-			} else {
-				s.logger.Error("Failed to parse timestamp value", "error", err, "value", request.AtValue)
-			}
-		case "VERSION":
-			// Parse version number
-			var tsVal int64
-			_, err := fmt.Sscanf(request.AtValue, "%d", &tsVal)
-			if err == nil {
-				ts = &tsVal
-			} else {
-				s.logger.Error("Failed to parse version value", "error", err, "value", request.AtValue)
-			}
-		default:
-			s.logger.Error("Unsupported time travel unit", "unit", request.AtUnit)
+	// Check if table supports dynamic schema (time travel)
+	if dynamicTable, ok := table.(catalog.DynamicSchemaTable); ok && timePoint != nil {
+		// Use SchemaForRequest to get schema at specific time point
+		schemaReq := &catalog.SchemaRequest{
+			TimePoint: timePoint,
+		}
+		var err error
+		tableSchema, err = dynamicTable.SchemaForRequest(ctx, schemaReq)
+		if err != nil {
+			s.logger.Error("Failed to get schema for time point",
+				"error", err,
+				"unit", timePoint.Unit,
+				"value", timePoint.Value,
+			)
+			return status.Errorf(codes.Internal, "failed to get schema for time point: %v", err)
+		}
+		s.logger.Debug("Using dynamic schema from SchemaForRequest",
+			"schema_fields", len(tableSchema.Fields()),
+		)
+	} else {
+		// Regular table - use current schema
+		tableSchema = table.ArrowSchema()
+		if tableSchema == nil {
+			return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", schemaName, tableOrFunctionName)
 		}
 	}
 
-	// Create ticket with time travel parameters
+	// Create ticket (time travel handled via ScanOptions in DoGet, not ticket fields)
 	ticketData := TicketData{
 		Schema: schemaName,
 		Table:  tableOrFunctionName,
-		Ts:     ts,
-		TsNs:   tsNs,
 	}
 	ticket, err := json.Marshal(ticketData)
 	if err != nil {
@@ -170,7 +178,7 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 	s.logger.Debug("handleFlightInfo completed",
 		"schema", schemaName,
 		"table", tableOrFunctionName,
-		"has_time_travel", ts != nil || tsNs != nil,
+		"has_time_travel", timePoint != nil,
 	)
 
 	return stream.Send(result)
