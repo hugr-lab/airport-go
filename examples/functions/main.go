@@ -1,4 +1,24 @@
-// Package main demonstrates scalar and table function implementation.
+// Package main demonstrates scalar and table function implementation with column projection.
+//
+// To test with DuckDB CLI:
+//
+//	duckdb
+//	INSTALL airport FROM community;
+//	LOAD airport;
+//	ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+//
+//	-- Scalar function:
+//	SELECT MULTIPLY(value, 10) FROM demo.functions_demo.users;
+//
+//	-- Table function with all columns:
+//	SELECT * FROM demo.functions_demo.GENERATE_SERIES(1, 5);
+//
+//	-- Table function with dynamic schema:
+//	SELECT * FROM demo.functions_demo.GENERATE_RANGE(1, 3, 4);  -- 4 columns
+//
+//	-- Column projection (server returns only requested columns):
+//	SELECT name FROM demo.functions_demo.users;
+//	SELECT col1, col3 FROM demo.functions_demo.GENERATE_RANGE(1, 5, 4);
 package main
 
 import (
@@ -49,6 +69,9 @@ func main() {
 	log.Println("  - Scalar: MULTIPLY(x INT64, factor INT64) -> INT64")
 	log.Println("  - Table:  GENERATE_SERIES(start INT64, stop INT64, [step INT64]) -> (value INT64)")
 	log.Println("  - Table:  GENERATE_RANGE(start, stop, columns) -> dynamic schema")
+	log.Println("\nColumn projection examples:")
+	log.Println("  SELECT name FROM demo.functions_demo.users;")
+	log.Println("  SELECT col1, col3 FROM demo.functions_demo.GENERATE_RANGE(1, 5, 4);")
 
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Server error: %v", err)
@@ -56,60 +79,120 @@ func main() {
 }
 
 func createCatalogWithFunctions() (catalog.Catalog, error) {
-	// Create simple data table
-	usersSchema := arrow.NewSchema([]arrow.Field{
-		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
-		{Name: "name", Type: arrow.BinaryTypes.String},
-		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
-	}, nil)
-
-	usersData := [][]interface{}{
-		{int64(1), "Alice", int64(100)},
-		{int64(2), "Bob", int64(200)},
-		{int64(3), "Charlie", int64(300)},
-	}
+	// Create simple data table with projection support
+	usersTable := NewUsersTableWithProjection()
 
 	return airport.NewCatalogBuilder().
 		Schema("functions_demo").
-		Comment("Schema demonstrating scalar and table functions").
-		SimpleTable(airport.SimpleTableDef{
-			Name:     "users",
-			Comment:  "Sample user data",
-			Schema:   usersSchema,
-			ScanFunc: makeScanFunc(usersSchema, usersData),
-		}).
+		Comment("Schema demonstrating scalar and table functions with column projection").
+		Table(usersTable).
 		ScalarFunc(&multiplyFunc{}).
 		TableFunc(&generateSeriesFunc{}).
 		TableFunc(&generateRangeFunc{}).
 		Build()
 }
 
-// makeScanFunc creates a scan function from static data.
-func makeScanFunc(schema *arrow.Schema, data [][]interface{}) func(context.Context, *catalog.ScanOptions) (array.RecordReader, error) {
-	return func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
-		record := buildRecord(schema, data)
-		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
-	}
+// =============================================================================
+// Table with Column Projection Support
+// =============================================================================
+
+// UsersTableWithProjection demonstrates column projection pushdown.
+// When a query requests specific columns, only those columns are returned.
+type UsersTableWithProjection struct {
+	schema *arrow.Schema
+	data   [][]any
 }
 
-// buildRecord creates an Arrow record batch from test data.
-func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBatch {
+func NewUsersTableWithProjection() *UsersTableWithProjection {
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	data := [][]any{
+		{int64(1), "Alice", int64(100)},
+		{int64(2), "Bob", int64(200)},
+		{int64(3), "Charlie", int64(300)},
+	}
+
+	return &UsersTableWithProjection{schema: schema, data: data}
+}
+
+func (t *UsersTableWithProjection) Name() string               { return "users" }
+func (t *UsersTableWithProjection) Comment() string            { return "Sample user data with column projection support" }
+func (t *UsersTableWithProjection) ArrowSchema() *arrow.Schema { return t.schema }
+
+func (t *UsersTableWithProjection) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+	// Handle column projection
+	outputSchema, columnIndices := t.projectColumns(opts)
+
+	fmt.Printf("[UsersTable] Scan with columns=%v\n", getColumnNames(opts))
+
+	// Build record with only requested columns
+	record := t.buildProjectedRecord(outputSchema, columnIndices)
+	return array.NewRecordReader(outputSchema, []arrow.RecordBatch{record})
+}
+
+func (t *UsersTableWithProjection) projectColumns(opts *catalog.ScanOptions) (*arrow.Schema, []int) {
+	if opts == nil || len(opts.Columns) == 0 {
+		// Return all columns
+		indices := make([]int, t.schema.NumFields())
+		for i := range indices {
+			indices[i] = i
+		}
+		return t.schema, indices
+	}
+
+	// Build column name to index map
+	colIndex := make(map[string]int)
+	for i := 0; i < t.schema.NumFields(); i++ {
+		colIndex[t.schema.Field(i).Name] = i
+	}
+
+	// Select only requested columns
+	var fields []arrow.Field
+	var indices []int
+	for _, col := range opts.Columns {
+		if idx, ok := colIndex[col]; ok {
+			fields = append(fields, t.schema.Field(idx))
+			indices = append(indices, idx)
+		}
+	}
+
+	if len(fields) == 0 {
+		// Fallback to all if no columns matched
+		indices = make([]int, t.schema.NumFields())
+		for i := range indices {
+			indices[i] = i
+		}
+		return t.schema, indices
+	}
+
+	return arrow.NewSchema(fields, nil), indices
+}
+
+func (t *UsersTableWithProjection) buildProjectedRecord(schema *arrow.Schema, columnIndices []int) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
 
-	for _, row := range data {
-		for i, val := range row {
-			switch v := val.(type) {
+	for _, row := range t.data {
+		for outIdx, srcIdx := range columnIndices {
+			switch v := row[srcIdx].(type) {
 			case int64:
-				builder.Field(i).(*array.Int64Builder).Append(v)
+				builder.Field(outIdx).(*array.Int64Builder).Append(v)
 			case string:
-				builder.Field(i).(*array.StringBuilder).Append(v)
+				builder.Field(outIdx).(*array.StringBuilder).Append(v)
 			}
 		}
 	}
 
 	return builder.NewRecordBatch()
 }
+
+// =============================================================================
+// Scalar Function: MULTIPLY
+// =============================================================================
 
 // multiplyFunc multiplies an integer column by a constant factor.
 type multiplyFunc struct{}
@@ -133,7 +216,7 @@ func (f *multiplyFunc) Signature() catalog.FunctionSignature {
 	}
 }
 
-func (f *multiplyFunc) Execute(ctx context.Context, input arrow.RecordBatch) (arrow.Array, error) {
+func (f *multiplyFunc) Execute(_ context.Context, input arrow.RecordBatch) (arrow.Array, error) {
 	if input.NumCols() != 2 {
 		return nil, fmt.Errorf("MULTIPLY expects 2 columns, got %d", input.NumCols())
 	}
@@ -156,8 +239,11 @@ func (f *multiplyFunc) Execute(ctx context.Context, input arrow.RecordBatch) (ar
 	return builder.NewInt64Array(), nil
 }
 
+// =============================================================================
+// Table Function: GENERATE_SERIES
+// =============================================================================
+
 // generateSeriesFunc generates a series of integers from start to stop.
-// Schema is fixed, but range depends on parameters.
 type generateSeriesFunc struct{}
 
 func (f *generateSeriesFunc) Name() string {
@@ -180,28 +266,15 @@ func (f *generateSeriesFunc) Signature() catalog.FunctionSignature {
 	}
 }
 
-func (f *generateSeriesFunc) SchemaForParameters(ctx context.Context, params []interface{}) (*arrow.Schema, error) {
-	// Schema is always the same - single Int64 column
+func (f *generateSeriesFunc) SchemaForParameters(_ context.Context, _ []any) (*arrow.Schema, error) {
 	return arrow.NewSchema([]arrow.Field{
 		{Name: "value", Type: arrow.PrimitiveTypes.Int64},
 	}, nil), nil
 }
 
-func (f *generateSeriesFunc) Execute(ctx context.Context, params []interface{}, opts *catalog.ScanOptions) (array.RecordReader, error) {
+func (f *generateSeriesFunc) Execute(_ context.Context, params []any, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	if len(params) < 2 || len(params) > 3 {
 		return nil, fmt.Errorf("GENERATE_SERIES requires 2 or 3 parameters, got %d", len(params))
-	}
-
-	// Extract parameters - can be float64 (from JSON) or int64 (from Arrow)
-	toInt64 := func(v interface{}) (int64, error) {
-		switch val := v.(type) {
-		case float64:
-			return int64(val), nil
-		case int64:
-			return val, nil
-		default:
-			return 0, fmt.Errorf("parameter must be number, got %T", v)
-		}
 	}
 
 	start, err := toInt64(params[0])
@@ -221,6 +294,8 @@ func (f *generateSeriesFunc) Execute(ctx context.Context, params []interface{}, 
 			return nil, fmt.Errorf("step: %w", err)
 		}
 	}
+
+	fmt.Printf("[GENERATE_SERIES] start=%d, stop=%d, step=%d\n", start, stop, step)
 
 	// Generate series
 	var values []int64
@@ -246,8 +321,11 @@ func (f *generateSeriesFunc) Execute(ctx context.Context, params []interface{}, 
 	return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 }
 
-// generateRangeFunc generates a table with dynamic schema based on column count parameter.
-// This demonstrates how table functions can return different schemas based on input.
+// =============================================================================
+// Table Function: GENERATE_RANGE with Column Projection
+// =============================================================================
+
+// generateRangeFunc generates a table with dynamic schema and column projection support.
 type generateRangeFunc struct{}
 
 func (f *generateRangeFunc) Name() string {
@@ -255,7 +333,7 @@ func (f *generateRangeFunc) Name() string {
 }
 
 func (f *generateRangeFunc) Comment() string {
-	return "Generates rows with dynamic number of columns (start, stop, column_count)"
+	return "Generates rows with dynamic number of columns (start, stop, column_count). Supports column projection."
 }
 
 func (f *generateRangeFunc) Signature() catalog.FunctionSignature {
@@ -270,27 +348,21 @@ func (f *generateRangeFunc) Signature() catalog.FunctionSignature {
 	}
 }
 
-func (f *generateRangeFunc) SchemaForParameters(ctx context.Context, params []interface{}) (*arrow.Schema, error) {
+func (f *generateRangeFunc) SchemaForParameters(_ context.Context, params []any) (*arrow.Schema, error) {
 	if len(params) != 3 {
 		return nil, fmt.Errorf("GENERATE_RANGE requires 3 parameters, got %d", len(params))
 	}
 
-	// Extract column count parameter - can be float64 (from JSON) or int64 (from Arrow)
-	var columnCount int64
-	switch v := params[2].(type) {
-	case float64:
-		columnCount = int64(v)
-	case int64:
-		columnCount = v
-	default:
-		return nil, fmt.Errorf("column_count parameter must be number, got %T", params[2])
+	columnCount, err := toInt64(params[2])
+	if err != nil {
+		return nil, fmt.Errorf("column_count: %w", err)
 	}
 
 	if columnCount < 1 || columnCount > 10 {
 		return nil, fmt.Errorf("column_count must be between 1 and 10, got %v", columnCount)
 	}
 
-	// Build dynamic schema with requested number of columns
+	// Build dynamic schema
 	fields := make([]arrow.Field, int(columnCount))
 	for i := 0; i < int(columnCount); i++ {
 		fields[i] = arrow.Field{
@@ -302,21 +374,9 @@ func (f *generateRangeFunc) SchemaForParameters(ctx context.Context, params []in
 	return arrow.NewSchema(fields, nil), nil
 }
 
-func (f *generateRangeFunc) Execute(ctx context.Context, params []interface{}, opts *catalog.ScanOptions) (array.RecordReader, error) {
+func (f *generateRangeFunc) Execute(ctx context.Context, params []any, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	if len(params) != 3 {
 		return nil, fmt.Errorf("GENERATE_RANGE requires 3 parameters, got %d", len(params))
-	}
-
-	// Extract parameters - can be float64 (from JSON) or int64 (from Arrow)
-	toInt64 := func(v interface{}) (int64, error) {
-		switch val := v.(type) {
-		case float64:
-			return int64(val), nil
-		case int64:
-			return val, nil
-		default:
-			return 0, fmt.Errorf("parameter must be number, got %T", v)
-		}
 	}
 
 	start, err := toInt64(params[0])
@@ -334,25 +394,93 @@ func (f *generateRangeFunc) Execute(ctx context.Context, params []interface{}, o
 		return nil, fmt.Errorf("column_count: %w", err)
 	}
 
-	// Get schema
-	schema, err := f.SchemaForParameters(ctx, params)
+	// Get full schema
+	fullSchema, err := f.SchemaForParameters(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build record with dynamic columns
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	// Handle column projection
+	outputSchema, columnIndices := projectSchemaColumns(fullSchema, opts)
+
+	fmt.Printf("[GENERATE_RANGE] start=%d, stop=%d, cols=%d, projected=%v\n",
+		start, stop, columnCount, getColumnNames(opts))
+
+	// Build record with projected columns
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, outputSchema)
 	defer builder.Release()
 
 	// Generate rows
 	for i := start; i <= stop; i++ {
-		for col := 0; col < int(columnCount); col++ {
-			// Each column gets row_index * (col + 1)
-			builder.Field(col).(*array.Int64Builder).Append(i * int64(col+1))
+		for outIdx, srcColIdx := range columnIndices {
+			// Each column value = row_index * (col + 1)
+			value := i * int64(srcColIdx+1)
+			builder.Field(outIdx).(*array.Int64Builder).Append(value)
 		}
 	}
 
 	record := builder.NewRecordBatch()
+	return array.NewRecordReader(outputSchema, []arrow.RecordBatch{record})
+}
 
-	return array.NewRecordReader(schema, []arrow.RecordBatch{record})
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+func toInt64(v any) (int64, error) {
+	switch val := v.(type) {
+	case float64:
+		return int64(val), nil
+	case int64:
+		return val, nil
+	case int:
+		return int64(val), nil
+	default:
+		return 0, fmt.Errorf("parameter must be number, got %T", v)
+	}
+}
+
+func projectSchemaColumns(schema *arrow.Schema, opts *catalog.ScanOptions) (*arrow.Schema, []int) {
+	if opts == nil || len(opts.Columns) == 0 {
+		// Return all columns
+		indices := make([]int, schema.NumFields())
+		for i := range indices {
+			indices[i] = i
+		}
+		return schema, indices
+	}
+
+	// Build column name to index map
+	colIndex := make(map[string]int)
+	for i := 0; i < schema.NumFields(); i++ {
+		colIndex[schema.Field(i).Name] = i
+	}
+
+	// Select only requested columns
+	var fields []arrow.Field
+	var indices []int
+	for _, col := range opts.Columns {
+		if idx, ok := colIndex[col]; ok {
+			fields = append(fields, schema.Field(idx))
+			indices = append(indices, idx)
+		}
+	}
+
+	if len(fields) == 0 {
+		// Fallback to all if no columns matched
+		indices = make([]int, schema.NumFields())
+		for i := range indices {
+			indices[i] = i
+		}
+		return schema, indices
+	}
+
+	return arrow.NewSchema(fields, nil), indices
+}
+
+func getColumnNames(opts *catalog.ScanOptions) []string {
+	if opts == nil || len(opts.Columns) == 0 {
+		return []string{"*"}
+	}
+	return opts.Columns
 }
