@@ -1,10 +1,11 @@
-version: 2
+version: "2"
 
 run:
   timeout: 10m
-  go: '1.25'
+  go: "1.25"
 
 linters:
+  default: none
   enable:
     - govet         # Vet examines Go source code
     - ineffassign   # Detect ineffectual assignments
@@ -14,37 +15,7 @@ linters:
     - unconvert     # Remove unnecessary type conversions
     - unparam       # Report unused function parameters
     - goprintffuncname  # Check printf-like functions
-  disable:
-    - errcheck      # Too many false positives on defer Close()
-
-linters-settings:
-  errcheck:
-    check-blank: false  # Don't check for unchecked blank assigns
-    exclude-functions:  # Ignore errors from Close and Write in defers
-      - (io.Closer).Close
-      - (io.Writer).Write
-
-  govet:
-    enable-all: true
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - unparam
-        - staticcheck
-    - path: tests/
-      linters:
-        - errcheck
-        - unparam
-        - staticcheck
-    - text: "Error return value.*Close.*is not checked"
-      linters:
-        - errcheck
-    - text: "SA1019.*grpc.Dial.*deprecated"
-      linters:
-        - staticcheck
-
-  max-issues-per-linter: 0
+  max-per-linter: 0
   max-same-issues: 0
