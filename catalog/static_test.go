@@ -25,8 +25,8 @@ func testScanFunc(schema *arrow.Schema) ScanFunc {
 func TestStaticCatalogSchemas(t *testing.T) {
 	cat := NewStaticCatalog()
 
-	cat.AddSchema("schema1", "First schema", make(map[string]*StaticTable), nil, nil, nil)
-	cat.AddSchema("schema2", "Second schema", make(map[string]*StaticTable), nil, nil, nil)
+	cat.AddSchema("schema1", "First schema", make(map[string]Table), nil, nil, nil)
+	cat.AddSchema("schema2", "Second schema", make(map[string]Table), nil, nil, nil)
 
 	ctx := context.Background()
 	schemas, err := cat.Schemas(ctx)
@@ -42,7 +42,7 @@ func TestStaticCatalogSchemas(t *testing.T) {
 // TestStaticCatalogSchemaLookup tests looking up specific schemas.
 func TestStaticCatalogSchemaLookup(t *testing.T) {
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", make(map[string]*StaticTable), nil, nil, nil)
+	cat.AddSchema("test", "Test schema", make(map[string]Table), nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -74,7 +74,7 @@ func TestStaticCatalogSchemaLookup(t *testing.T) {
 // TestStaticSchemaComments tests that schema comments are preserved.
 func TestStaticSchemaComments(t *testing.T) {
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "This is a test comment", make(map[string]*StaticTable), nil, nil, nil)
+	cat.AddSchema("test", "This is a test comment", make(map[string]Table), nil, nil, nil)
 
 	ctx := context.Background()
 	schema, err := cat.Schema(ctx, "test")
@@ -96,7 +96,7 @@ func TestStaticSchemaTables(t *testing.T) {
 	table1 := NewStaticTable("table1", "First table", arrowSchema, testScanFunc(arrowSchema))
 	table2 := NewStaticTable("table2", "Second table", arrowSchema, testScanFunc(arrowSchema))
 
-	tables := map[string]*StaticTable{
+	tables := map[string]Table{
 		"table1": table1,
 		"table2": table2,
 	}
@@ -128,7 +128,7 @@ func TestStaticSchemaTableLookup(t *testing.T) {
 
 	table1 := NewStaticTable("users", "Users table", arrowSchema, testScanFunc(arrowSchema))
 
-	tables := map[string]*StaticTable{
+	tables := map[string]Table{
 		"users": table1,
 	}
 
@@ -214,7 +214,7 @@ func TestStaticSchemaFunctions(t *testing.T) {
 	mockTable := &mockTableFunc{name: "TEST_TABLE_FUNC"}
 
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", make(map[string]*StaticTable), []ScalarFunction{mockScalar}, []TableFunction{mockTable}, nil)
+	cat.AddSchema("test", "Test schema", make(map[string]Table), []ScalarFunction{mockScalar}, []TableFunction{mockTable}, nil)
 
 	ctx := context.Background()
 	schema, err := cat.Schema(ctx, "test")
@@ -248,7 +248,7 @@ func TestStaticCatalogConcurrentAccess(t *testing.T) {
 	}, nil)
 
 	table1 := NewStaticTable("table1", "Test table", arrowSchema, testScanFunc(arrowSchema))
-	tables := map[string]*StaticTable{
+	tables := map[string]Table{
 		"table1": table1,
 	}
 
@@ -324,7 +324,7 @@ func TestStaticCatalogContextCancellation(t *testing.T) {
 	}
 
 	table1 := NewStaticTable("table1", "Test table", arrowSchema, scanFunc)
-	tables := map[string]*StaticTable{
+	tables := map[string]Table{
 		"table1": table1,
 	}
 
