@@ -92,12 +92,6 @@ func TestDMLInsert(t *testing.T) {
 		}
 	})
 
-	t.Run("InsertWithReturning", func(t *testing.T) {
-		// RETURNING tests are in TestDMLInsertReturning - skip here
-		// as this test function uses a table without RETURNING enabled
-		t.Skip("See TestDMLInsertReturning for RETURNING clause tests")
-	})
-
 	t.Run("InsertLargeDataset", func(t *testing.T) {
 		table.Clear()
 
