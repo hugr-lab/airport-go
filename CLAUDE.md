@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2025-11-25
 
 ## Active Technologies
+- Go 1.21+ (001-repo-preparation)
+- Implementation-defined (spec remains storage-agnostic); Airport server abstracts storage via catalog.Catalog interface (001-repo-preparation)
 
 - Go 1.25+ (recommended for latest stdlib features and performance) (001-001-flight-server)
 
@@ -33,6 +35,7 @@ tests/
 Go 1.25+ (recommended for latest stdlib features and performance): Follow standard conventions
 
 ## Recent Changes
+- 001-repo-preparation: Added Go 1.21+
 
 - 001-001-flight-server: Added Go 1.25+ (recommended for latest stdlib features and performance)
 

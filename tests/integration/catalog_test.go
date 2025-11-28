@@ -23,7 +23,7 @@ func TestCatalogDiscovery(t *testing.T) {
 
 	// Test 1: Discover schemas
 	t.Run("ListSchemas", func(t *testing.T) {
-		rows, err := db.Query("SELECT schema_name FROM duckdb_schemas() WHERE catalog_name = ?", attachName)
+		rows, err := db.Query("SELECT schema_name FROM duckdb_schemas() WHERE database_name = ?", attachName)
 		if err != nil {
 			t.Fatalf("Failed to query schemas: %v", err)
 		}
@@ -38,23 +38,23 @@ func TestCatalogDiscovery(t *testing.T) {
 			schemas = append(schemas, name)
 		}
 
-		// Should have "main" schema
+		// Should have "some_schema" schema
 		found := false
 		for _, s := range schemas {
-			if s == "main" {
+			if s == "some_schema" {
 				found = true
 				break
 			}
 		}
 
 		if !found {
-			t.Errorf("Expected to find 'main' schema, got schemas: %v", schemas)
+			t.Errorf("Expected to find 'some_schema' schema, got schemas: %v", schemas)
 		}
 	})
-
 	// Test 2: Discover tables
+
 	t.Run("ListTables", func(t *testing.T) {
-		query := "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'main' AND catalog_name = ?"
+		query := "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'some_schema' AND database_name = ?"
 		rows, err := db.Query(query, attachName)
 		if err != nil {
 			t.Fatalf("Failed to query tables: %v", err)
@@ -90,13 +90,14 @@ func TestCatalogDiscovery(t *testing.T) {
 	})
 
 	// Test 3: Discover columns
+
 	t.Run("ListColumns", func(t *testing.T) {
 		query := `SELECT column_name, data_type
-		          FROM duckdb_columns()
-		          WHERE table_name = 'users'
-		          AND schema_name = 'main'
-		          AND catalog_name = ?
-		          ORDER BY column_name`
+	   		          FROM duckdb_columns()
+	   		          WHERE table_name = 'users'
+	   		          AND schema_name = 'some_schema'
+	   		          AND database_name = ?
+	   		          ORDER BY column_name`
 
 		rows, err := db.Query(query, attachName)
 		if err != nil {
@@ -138,24 +139,9 @@ func TestCatalogDiscovery(t *testing.T) {
 		}
 	})
 
-	// Test 4: SHOW TABLES works
-	t.Run("ShowTables", func(t *testing.T) {
-		query := "SHOW TABLES FROM " + attachName + ".main"
-		rows, err := db.Query(query)
-		if err != nil {
-			t.Fatalf("SHOW TABLES failed: %v", err)
-		}
-		defer rows.Close()
-
-		tableCount := 0
-		for rows.Next() {
-			tableCount++
-		}
-
-		if tableCount < 2 {
-			t.Errorf("Expected at least 2 tables, got %d", tableCount)
-		}
-	})
+	// Note: Removed ShowTables test - SHOW in DuckDB is an alias for DESCRIBE,
+	// which shows schema of a table/view/query, not a list of tables.
+	// Table listing is already tested in ListTables test above.
 }
 
 // TestCatalogMetadata verifies that table and column metadata is correctly
@@ -174,7 +160,7 @@ func TestCatalogMetadata(t *testing.T) {
 	t.Run("TableComments", func(t *testing.T) {
 		// DuckDB may or may not expose table comments through system tables
 		// This test documents expected behavior
-		query := "SELECT comment FROM duckdb_tables() WHERE table_name = 'users' AND schema_name = 'main'"
+		query := "SELECT comment FROM duckdb_tables() WHERE table_name = 'users' AND schema_name = 'some_schema'"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Skipf("Table comments not supported: %v", err)
@@ -198,7 +184,7 @@ func TestCatalogMetadata(t *testing.T) {
 		query := `SELECT column_name, data_type
 		          FROM duckdb_columns()
 		          WHERE table_name = 'products'
-		          AND schema_name = 'main'
+		          AND schema_name = 'some_schema'
 		          ORDER BY column_name`
 
 		rows, err := db.Query(query)

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -124,6 +124,10 @@ func (s *dynamicTestSchema) TableFunctions(ctx context.Context) ([]catalog.Table
 	return nil, nil
 }
 
+func (s *dynamicTestSchema) TableFunctionsInOut(ctx context.Context) ([]catalog.TableFunctionInOut, error) {
+	return nil, nil
+}
+
 // liveTable is a table whose data changes on each scan.
 type liveTable struct {
 	name    string
@@ -148,7 +152,7 @@ func (t *liveTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.
 	data := t.getData()
 	record := buildTestRecord(t.schema, data)
 	defer record.Release()
-	return array.NewRecordReader(t.schema, []arrow.Record{record})
+	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }
 
 // TestDynamicCatalog verifies that catalogs can change at runtime
@@ -170,7 +174,7 @@ func TestDynamicCatalog(t *testing.T) {
 
 	// Test 1: Initial schema is visible
 	t.Run("InitialSchema", func(t *testing.T) {
-		query := "SELECT schema_name FROM duckdb_schemas() WHERE catalog_name = ?"
+		query := "SELECT schema_name FROM duckdb_schemas() WHERE database_name = ?"
 		rows, err := db.Query(query, attachName)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)
@@ -299,7 +303,7 @@ func TestDynamicTables(t *testing.T) {
 
 	// Test 1: No tables initially
 	t.Run("NoTables", func(t *testing.T) {
-		query := "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'dynamic' AND catalog_name = ?"
+		query := "SELECT table_name FROM duckdb_tables() WHERE schema_name = 'dynamic' AND database_name = ?"
 		rows, err := db.Query(query, attachName)
 		if err != nil {
 			t.Fatalf("Query failed: %v", err)

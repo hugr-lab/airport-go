@@ -2,10 +2,11 @@ package flight
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 
-	"github.com/apache/arrow/go/v18/arrow/flight"
-	"github.com/apache/arrow/go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -27,7 +28,7 @@ import (
 func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 	ctx := stream.Context()
 
-	s.logger.Info("DoPut called")
+	s.logger.Debug("DoPut called")
 
 	// Receive first message to get descriptor and schema
 	msg, err := stream.Recv()
@@ -45,7 +46,7 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 		return status.Error(codes.InvalidArgument, "missing flight descriptor")
 	}
 
-	s.logger.Info("DoPut request",
+	s.logger.Debug("DoPut request",
 		"type", descriptor.GetType(),
 		"cmd_length", len(descriptor.GetCmd()),
 		"path_length", len(descriptor.GetPath()),
@@ -72,28 +73,48 @@ func (s *Server) DoPut(stream flight.FlightService_DoPutServer) error {
 		return handleErr
 	}
 
-	// Send result back to client
-	if err := stream.Send(result); err != nil {
-		s.logger.Error("Failed to send PutResult", "error", err)
-		return status.Errorf(codes.Internal, "failed to send result: %v", err)
+	// Send result back to client (if not already sent by handler)
+	if result != nil {
+		if err := stream.Send(result); err != nil {
+			s.logger.Error("Failed to send PutResult", "error", err)
+			return status.Errorf(codes.Internal, "failed to send result: %v", err)
+		}
 	}
 
-	s.logger.Info("DoPut completed successfully")
+	s.logger.Debug("DoPut completed successfully")
 
 	return nil
 }
 
 // handleDoPutCommand processes CMD-type DoPut requests.
-// The command bytes typically contain MessagePack-encoded parameters.
+// The command bytes can contain either:
+// - MessagePack-encoded parameters for queries
+// - JSON-encoded DML operation descriptors (INSERT, UPDATE)
+//nolint:unparam
 func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.FlightDescriptor, msg *flight.FlightData, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	cmd := descriptor.GetCmd()
 	if len(cmd) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "empty command in descriptor")
 	}
 
-	s.logger.Info("Processing DoPut command", "cmd_size", len(cmd))
+	s.logger.Debug("Processing DoPut command", "cmd_size", len(cmd))
 
-	// Attempt to decode MessagePack parameters (T053 - parameter validation)
+	// Try to detect if this is a DML operation by checking for JSON structure
+	// DML descriptors have schema_name and table_name fields
+	var dmlCheck map[string]interface{}
+	if err := json.Unmarshal(cmd, &dmlCheck); err == nil {
+		// Successfully parsed as JSON - check if it's a DML operation
+		if operation, ok := dmlCheck["operation"].(string); ok {
+			switch operation {
+			case "insert":
+				return s.handleDoPutInsert(dmlCheck, stream)
+			case "update":
+				return s.handleDoPutUpdate(dmlCheck, stream)
+			}
+		}
+	}
+
+	// Not a DML operation - try MessagePack parameters (T053 - parameter validation)
 	params, err := msgpack.DecodeMap(cmd)
 	if err != nil {
 		s.logger.Error("Failed to decode MessagePack parameters",
@@ -103,7 +124,7 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 		return nil, status.Errorf(codes.InvalidArgument, "invalid MessagePack parameters: %v", err)
 	}
 
-	s.logger.Info("Decoded parameters", "param_count", len(params))
+	s.logger.Debug("Decoded parameters", "param_count", len(params))
 
 	// Read Arrow data from stream if present
 	var recordCount int64
@@ -116,7 +137,7 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 	// Process records from client
 	for reader.Next() {
-		record := reader.Record()
+		record := reader.RecordBatch()
 		recordCount += record.NumRows()
 		s.logger.Debug("Received record batch",
 			"rows", record.NumRows(),
@@ -143,16 +164,17 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 // handleDoPutPath processes PATH-type DoPut requests.
 // Typically used for INSERT operations into a specific table.
+//nolint:unparam
 func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightDescriptor, msg *flight.FlightData, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
 	path := descriptor.GetPath()
 	if len(path) != 2 {
 		return nil, status.Error(codes.InvalidArgument, "path must contain [schema, table]")
 	}
 
-	schemaName := string(path[0])
-	tableName := string(path[1])
+	schemaName := path[0]
+	tableName := path[1]
 
-	s.logger.Info("Processing DoPut path",
+	s.logger.Debug("Processing DoPut path",
 		"schema", schemaName,
 		"table", tableName,
 	)
@@ -168,7 +190,7 @@ func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightD
 
 	// Process records
 	for reader.Next() {
-		record := reader.Record()
+		record := reader.RecordBatch()
 		recordCount += record.NumRows()
 		s.logger.Debug("Received record batch for insert",
 			"schema", schemaName,
@@ -198,15 +220,15 @@ func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightD
 
 // flightDataReader adapts FlightData stream to io.Reader for IPC reader.
 type flightDataReader struct {
-	firstMsg *flight.FlightData
-	stream   flight.FlightService_DoPutServer
+	firstMsg  *flight.FlightData
+	stream    flight.FlightService_DoPutServer
 	firstRead bool
 }
 
 func newFlightDataReader(firstMsg *flight.FlightData, stream flight.FlightService_DoPutServer) *flightDataReader {
 	return &flightDataReader{
-		firstMsg: firstMsg,
-		stream:   stream,
+		firstMsg:  firstMsg,
+		stream:    stream,
 		firstRead: false,
 	}
 }
@@ -233,4 +255,63 @@ func (r *flightDataReader) Read(p []byte) (n int, err error) {
 
 	n = copy(p, msg.DataBody)
 	return n, nil
+}
+
+// handleDoPutInsert processes INSERT operations via DoPut.
+// The descriptor map should contain schema_name and table_name.
+//nolint:unparam
+func (s *Server) handleDoPutInsert(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
+	// Parse descriptor
+	descriptorBytes, err := json.Marshal(descriptorMap)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
+	}
+
+	var descriptor InsertDescriptor
+	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid INSERT descriptor: %v", err)
+	}
+
+	s.logger.Debug("Processing INSERT operation",
+		"schema", descriptor.SchemaName,
+		"table", descriptor.TableName,
+	)
+
+	// Call the DML handler - it sends the result internally
+	if err := s.handleInsert(&descriptor, stream); err != nil {
+		return nil, err
+	}
+
+	// Return nil to indicate result was already sent
+	return nil, nil
+}
+
+// handleDoPutUpdate processes UPDATE operations via DoPut.
+// The descriptor map should contain schema_name, table_name, and row_ids.
+//nolint:unparam
+func (s *Server) handleDoPutUpdate(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
+	// Parse descriptor
+	descriptorBytes, err := json.Marshal(descriptorMap)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
+	}
+
+	var descriptor UpdateDescriptor
+	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid UPDATE descriptor: %v", err)
+	}
+
+	s.logger.Debug("Processing UPDATE operation",
+		"schema", descriptor.SchemaName,
+		"table", descriptor.TableName,
+		"row_count", len(descriptor.RowIds),
+	)
+
+	// Call the DML handler - it sends the result internally
+	if err := s.handleUpdate(&descriptor, stream); err != nil {
+		return nil, err
+	}
+
+	// Return nil to indicate result was already sent
+	return nil, nil
 }

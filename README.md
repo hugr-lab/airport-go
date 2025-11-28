@@ -35,9 +35,9 @@ import (
     "log"
     "net"
 
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/array"
-    "github.com/apache/arrow/go/v18/arrow/memory"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow/memory"
     "google.golang.org/grpc"
 
     "github.com/hugr-lab/airport-go"
@@ -173,11 +173,213 @@ You can either:
 
 ## Performance Tips
 
-1. **Batch Size**: Return 10,000-100,000 rows per batch (not single rows)
-2. **Connection Pooling**: Reuse database connections in scan functions
-3. **Streaming**: Don't load entire result sets into memory
-4. **Context Cancellation**: Check `ctx.Done()` in loops for early termination
-5. **gRPC Message Size**: Set `grpc.MaxRecvMsgSize(16 * 1024 * 1024)` for large batches
+### Batch Sizing
+
+**Optimal batch size: 10,000-100,000 rows**
+
+```go
+// Good: Return multiple rows per batch
+func scanLarge(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    records := make([]arrow.Record, 0)
+    for i := 0; i < 10; i++ {  // 10 batches
+        record := buildBatch(10000) // 10k rows each
+        records = append(records, record)
+    }
+    return array.NewRecordReader(schema, records)
+}
+
+// Bad: Single row per batch
+func scanSlow(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    records := make([]arrow.Record, 0)
+    for i := 0; i < 100000; i++ {  // 100k batches!
+        record := buildBatch(1)  // 1 row per batch - slow!
+        records = append(records, record)
+    }
+    return array.NewRecordReader(schema, records)
+}
+```
+
+### Connection Pooling
+
+Reuse database connections across scan invocations:
+
+```go
+type MyTable struct {
+    db *sql.DB  // Shared connection pool
+}
+
+func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    // Use existing pool, don't create new connections
+    rows, err := t.db.QueryContext(ctx, "SELECT * FROM data")
+    if err != nil {
+        return nil, err
+    }
+    // Convert rows to Arrow batches...
+}
+```
+
+### Streaming Large Datasets
+
+Don't load entire results into memory:
+
+```go
+// Good: Stream batches as you read
+func streamScan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    rows, _ := db.QueryContext(ctx, "SELECT * FROM large_table")
+
+    // Create streaming reader that builds batches on-demand
+    return NewStreamingReader(rows, batchSize), nil
+}
+
+// Bad: Load everything first
+func bufferedScan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    rows, _ := db.QueryContext(ctx, "SELECT * FROM large_table")
+
+    // Loads all data into memory first - OOM risk!
+    allRecords := make([]arrow.Record, 0)
+    for rows.Next() {
+        record := convertRow(rows)
+        allRecords = append(allRecords, record)
+    }
+    return array.NewRecordReader(schema, allRecords)
+}
+```
+
+### Context Cancellation
+
+Respect client cancellations to avoid wasted work:
+
+```go
+func scanWithCancellation(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    rows, _ := db.QueryContext(ctx, "SELECT * FROM data")
+
+    records := make([]arrow.Record, 0)
+    for rows.Next() {
+        // Check if client disconnected
+        select {
+        case <-ctx.Done():
+            return nil, ctx.Err()
+        default:
+        }
+
+        record := convertRow(rows)
+        records = append(records, record)
+    }
+
+    return array.NewRecordReader(schema, records)
+}
+```
+
+### gRPC Message Size
+
+Configure larger message sizes for big Arrow batches:
+
+```go
+config := airport.ServerConfig{
+    Catalog: cat,
+    MaxMessageSize: 16 * 1024 * 1024,  // 16MB (default is 4MB)
+}
+
+opts := airport.ServerOptions(config)
+grpcServer := grpc.NewServer(opts...)
+```
+
+### Memory Management
+
+Release Arrow objects to avoid memory leaks:
+
+```go
+func buildRecord(schema *arrow.Schema) arrow.Record {
+    builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+    defer builder.Release()  // Always release builders
+
+    // Build record...
+    record := builder.NewRecord()
+    // Caller must release the record
+    return record
+}
+
+func scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    record1 := buildRecord(schema)
+    defer record1.Release()  // Release when done
+
+    record2 := buildRecord(schema)
+    defer record2.Release()
+
+    // RecordReader takes ownership, don't release until reader is closed
+    return array.NewRecordReader(schema, []arrow.Record{record1.NewSlice(0, record1.NumRows()), record2.NewSlice(0, record2.NumRows())})
+}
+```
+
+### Parallel Processing
+
+Process multiple tables concurrently:
+
+```go
+type ParallelCatalog struct {
+    tables map[string]catalog.Table
+}
+
+func (c *ParallelCatalog) Tables(ctx context.Context) ([]catalog.Table, error) {
+    // Return all tables - they can be queried in parallel
+    result := make([]catalog.Table, 0, len(c.tables))
+    for _, table := range c.tables {
+        result = append(result, table)
+    }
+    return result, nil
+}
+```
+
+### Benchmarking
+
+Measure your server's performance:
+
+```bash
+# Run with benchmarks
+go test -bench=. -benchmem ./tests/benchmarks/
+
+# CPU profiling
+go test -cpuprofile=cpu.prof -bench=BenchmarkScan
+go tool pprof cpu.prof
+
+# Memory profiling
+go test -memprofile=mem.prof -bench=BenchmarkScan
+go tool pprof mem.prof
+```
+
+## Project Structure
+
+```
+airport-go/
+├── catalog/             # Catalog interfaces and types
+├── auth/               # Authentication (bearer token)
+├── flight/             # Flight server implementation
+├── internal/           # Internal packages (serialization, etc.)
+├── examples/           # Example server implementations
+│   ├── basic/         # Basic server example
+│   ├── auth/          # Authenticated server example
+│   └── dynamic/       # Dynamic catalog example
+├── tests/
+│   └── integration/   # Integration tests (requires DuckDB)
+└── *.go               # Root-level package files and unit tests
+```
+
+## Testing
+
+Run unit tests:
+```bash
+go test ./...
+```
+
+Run integration tests (requires DuckDB with Airport extension):
+```bash
+go test ./tests/integration/...
+```
+
+Run all tests with race detector:
+```bash
+go test -race ./...
+```
 
 ## Contributing
 
@@ -186,6 +388,7 @@ Contributions are welcome! Please:
 1. Follow idiomatic Go style (`gofmt`, `golangci-lint`)
 2. Include tests for new functionality
 3. Update documentation for API changes
+4. Place integration tests in `tests/integration/`
 
 ## License
 

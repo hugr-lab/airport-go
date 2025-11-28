@@ -1,7 +1,7 @@
 package flight
 
 import (
-	"github.com/apache/arrow/go/v18/arrow/flight"
+	"github.com/apache/arrow-go/v18/arrow/flight"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -20,7 +20,7 @@ import (
 func (s *Server) ListFlights(criteria *flight.Criteria, stream flight.FlightService_ListFlightsServer) error {
 	ctx := stream.Context()
 
-	s.logger.Info("ListFlights called")
+	s.logger.Debug("ListFlights called")
 
 	// Serialize catalog to Arrow IPC format following Flight SQL schema
 	catalogData, err := serialize.SerializeCatalog(ctx, s.catalog, s.allocator)
@@ -41,7 +41,7 @@ func (s *Server) ListFlights(criteria *flight.Criteria, stream flight.FlightServ
 	}
 
 	compressionRatio := float64(len(catalogData)) / float64(len(compressed))
-	s.logger.Info("Catalog compressed",
+	s.logger.Debug("Catalog compressed",
 		"uncompressed_bytes", len(catalogData),
 		"compressed_bytes", len(compressed),
 		"compression_ratio", compressionRatio,
@@ -73,7 +73,7 @@ func (s *Server) ListFlights(criteria *flight.Criteria, stream flight.FlightServ
 		return status.Errorf(codes.Internal, "failed to send flight info: %v", err)
 	}
 
-	s.logger.Info("ListFlights completed successfully",
+	s.logger.Debug("ListFlights completed successfully",
 		"compressed_bytes", len(compressed),
 	)
 

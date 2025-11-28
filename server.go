@@ -3,8 +3,9 @@ package airport
 import (
 	"fmt"
 	"log/slog"
+	"os"
 
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
 	"github.com/hugr-lab/airport-go/auth"
@@ -55,11 +56,19 @@ func NewServer(grpcServer *grpc.Server, config ServerConfig) error {
 
 	logger := config.Logger
 	if logger == nil {
-		logger = slog.Default()
+		// Create logger with specified level or default to Info
+		level := slog.LevelInfo
+		if config.LogLevel != nil {
+			level = *config.LogLevel
+		}
+		handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: level,
+		})
+		logger = slog.New(handler)
 	}
 
 	// Create Flight server
-	flightServer := flight.NewServer(config.Catalog, allocator, logger)
+	flightServer := flight.NewServer(config.Catalog, allocator, logger, config.Address)
 
 	// Register Flight service
 	flight.RegisterFlightServer(grpcServer, flightServer)
@@ -76,7 +85,7 @@ func NewServer(grpcServer *grpc.Server, config ServerConfig) error {
 // validateConfig checks that required ServerConfig fields are valid.
 func validateConfig(config ServerConfig) error {
 	if config.Catalog == nil {
-		return fmt.Errorf("Catalog is required")
+		return fmt.Errorf("catalog is required")
 	}
 	return nil
 }

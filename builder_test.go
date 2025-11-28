@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -16,9 +16,9 @@ func testScanFunc(schema *arrow.Schema) catalog.ScanFunc {
 	return func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 		builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 		defer builder.Release()
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		defer record.Release()
-		return array.NewRecordReader(schema, []arrow.Record{record})
+		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 }
 
@@ -366,8 +366,9 @@ func (m *mockScalarFunc) Signature() catalog.FunctionSignature {
 	}
 }
 
-func (m *mockScalarFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Record, error) {
-	return input, nil
+func (m *mockScalarFunc) Execute(ctx context.Context, input arrow.RecordBatch) (arrow.Array, error) {
+	// Return first column as result
+	return input.Column(0), nil
 }
 
 type mockTableFunc struct {

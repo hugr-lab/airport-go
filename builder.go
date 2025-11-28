@@ -3,7 +3,7 @@ package airport
 import (
 	"fmt"
 
-	"github.com/apache/arrow/go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -121,8 +121,8 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 	// Create static catalog and populate it
 	cat := catalog.NewStaticCatalog()
 	for _, sb := range cb.schemas {
-		// Convert tables to static tables
-		tables := make(map[string]*catalog.StaticTable)
+		// Convert tables to catalog.Table interface
+		tables := make(map[string]catalog.Table)
 		for _, tableDef := range sb.tables {
 			tables[tableDef.Name] = catalog.NewStaticTable(
 				tableDef.Name,
@@ -132,8 +132,13 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 			)
 		}
 
+		// Add custom tables directly
+		for _, customTable := range sb.customTables {
+			tables[customTable.Name()] = customTable
+		}
+
 		// Add schema to catalog
-		cat.AddSchema(sb.name, sb.comment, tables, sb.scalarFuncs, sb.tableFuncs)
+		cat.AddSchema(sb.name, sb.comment, tables, sb.scalarFuncs, sb.tableFuncs, sb.tableFuncsInOut)
 	}
 
 	return cat, nil
@@ -147,12 +152,14 @@ type SchemaBuilder struct {
 
 // schemaBuilder is the internal schema builder implementation.
 type schemaBuilder struct {
-	name           string
-	comment        string
-	tables         []SimpleTableDef
-	scalarFuncs    []catalog.ScalarFunction
-	tableFuncs     []catalog.TableFunction
-	catalogBuilder *CatalogBuilder
+	name            string
+	comment         string
+	tables          []SimpleTableDef
+	customTables    []catalog.Table
+	scalarFuncs     []catalog.ScalarFunction
+	tableFuncs      []catalog.TableFunction
+	tableFuncsInOut []catalog.TableFunctionInOut
+	catalogBuilder  *CatalogBuilder
 }
 
 // Comment sets optional schema documentation.
@@ -179,6 +186,19 @@ func (sb *SchemaBuilder) SimpleTable(def SimpleTableDef) *SchemaBuilder {
 	return sb
 }
 
+// CustomTable adds a custom table implementation to this schema.
+// The table can implement catalog.Table or catalog.DynamicSchemaTable.
+// Returns self for method chaining.
+// Table name MUST be unique within schema.
+//
+// Example:
+//
+//	schema.CustomTable(&MyCustomTable{})
+func (sb *SchemaBuilder) CustomTable(table catalog.Table) *SchemaBuilder {
+	sb.builder.customTables = append(sb.builder.customTables, table)
+	return sb
+}
+
 // ScalarFunc adds a scalar function to this schema.
 // Returns self for method chaining.
 // Function name MUST be unique within schema.
@@ -200,6 +220,18 @@ func (sb *SchemaBuilder) ScalarFunc(fn catalog.ScalarFunction) *SchemaBuilder {
 //	schema.TableFunc(&ReadParquetFunc{})
 func (sb *SchemaBuilder) TableFunc(fn catalog.TableFunction) *SchemaBuilder {
 	sb.builder.tableFuncs = append(sb.builder.tableFuncs, fn)
+	return sb
+}
+
+// TableFuncInOut registers a table function that accepts row sets as input.
+// Returns self for method chaining.
+// Function name MUST be unique within schema.
+//
+// Example:
+//
+//	schema.TableFuncInOut(&FilterRowsFunc{})
+func (sb *SchemaBuilder) TableFuncInOut(fn catalog.TableFunctionInOut) *SchemaBuilder {
+	sb.builder.tableFuncsInOut = append(sb.builder.tableFuncsInOut, fn)
 	return sb
 }
 

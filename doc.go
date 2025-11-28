@@ -19,9 +19,9 @@
 //	    "log"
 //	    "net"
 //
-//	    "github.com/apache/arrow/go/v18/arrow"
-//	    "github.com/apache/arrow/go/v18/arrow/array"
-//	    "github.com/apache/arrow/go/v18/arrow/memory"
+//	    "github.com/apache/arrow-go/v18/arrow"
+//	    "github.com/apache/arrow-go/v18/arrow/array"
+//	    "github.com/apache/arrow-go/v18/arrow/memory"
 //	    "google.golang.org/grpc"
 //
 //	    "github.com/hugr-lab/airport-go"
@@ -42,7 +42,7 @@
 //	        builder.Field(1).(*array.StringBuilder).AppendValues([]string{"Alice", "Bob", "Charlie"}, nil)
 //	        record := builder.NewRecord()
 //	        defer record.Release()
-//	        return array.NewRecordReader(userSchema, []arrow.Record{record})
+//	        return array.NewRecordReader(userSchema, []arrow.RecordBatch{record})
 //	    }
 //
 //	    // Build catalog

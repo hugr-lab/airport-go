@@ -3,7 +3,7 @@
 **Package**: `github.com/your-org/airport-go`
 **Purpose**: Fluent API for building static catalogs
 **Go Version**: 1.23+
-**Arrow Version**: `github.com/apache/arrow/go/v18/arrow`
+**Arrow Version**: `github.com/apache/arrow-go/v18/arrow`
 
 ## CatalogBuilder API
 
@@ -11,7 +11,7 @@
 package airport
 
 import (
-    "github.com/apache/arrow/go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow"
 
     "github.com/your-org/airport-go/catalog"
 )

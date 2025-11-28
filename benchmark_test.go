@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/catalog"
 	"github.com/hugr-lab/airport-go/internal/serialize"
@@ -85,10 +85,10 @@ func BenchmarkTableScan(b *testing.B) {
 				builder.Field(0).(*array.Int64Builder).AppendValues(ids, nil)
 				builder.Field(1).(*array.Float64Builder).AppendValues(values, nil)
 
-				record := builder.NewRecord()
+				record := builder.NewRecordBatch()
 				defer record.Release()
 
-				return array.NewRecordReader(schema, []arrow.Record{record})
+				return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 			}
 
 			cat, _ := NewCatalogBuilder().
@@ -115,7 +115,7 @@ func BenchmarkTableScan(b *testing.B) {
 
 				rowCount := int64(0)
 				for reader.Next() {
-					rowCount += reader.Record().NumRows()
+					rowCount += reader.RecordBatch().NumRows()
 				}
 
 				reader.Release()
@@ -144,9 +144,9 @@ func BenchmarkCatalogBuilder(b *testing.B) {
 			scanFunc := func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 				builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 				defer builder.Release()
-				record := builder.NewRecord()
+				record := builder.NewRecordBatch()
 				defer record.Release()
-				return array.NewRecordReader(schema, []arrow.Record{record})
+				return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 			}
 
 			b.ResetTimer()
@@ -207,7 +207,7 @@ func BenchmarkRecordBuilding(b *testing.B) {
 		builder.Field(1).(*array.StringBuilder).AppendValues(strData, nil)
 		builder.Field(2).(*array.Float64Builder).AppendValues(floatData, nil)
 
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		record.Release()
 		builder.Release()
 	}
@@ -232,10 +232,10 @@ func BenchmarkConcurrentScans(b *testing.B) {
 		}
 		builder.Field(0).(*array.Int64Builder).AppendValues(ids, nil)
 
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		defer record.Release()
 
-		return array.NewRecordReader(schema, []arrow.Record{record})
+		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 
 	cat, _ := NewCatalogBuilder().
@@ -262,7 +262,7 @@ func BenchmarkConcurrentScans(b *testing.B) {
 			}
 
 			for reader.Next() {
-				_ = reader.Record()
+				_ = reader.RecordBatch()
 			}
 
 			reader.Release()
@@ -322,6 +322,10 @@ func (s *benchSchema) TableFunctions(ctx context.Context) ([]catalog.TableFuncti
 	return nil, nil
 }
 
+func (s *benchSchema) TableFunctionsInOut(ctx context.Context) ([]catalog.TableFunctionInOut, error) {
+	return nil, nil
+}
+
 type benchTable struct {
 	name   string
 	schema *arrow.Schema
@@ -342,7 +346,7 @@ func (t *benchTable) ArrowSchema() *arrow.Schema {
 func (t *benchTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, t.schema)
 	defer builder.Release()
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
-	return array.NewRecordReader(t.schema, []arrow.Record{record})
+	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }

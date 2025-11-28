@@ -7,10 +7,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/ipc"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 
 	"github.com/hugr-lab/airport-go/catalog"
 )
@@ -59,7 +59,7 @@ func SerializeCatalog(ctx context.Context, cat catalog.Catalog, allocator memory
 		}
 	}
 
-	record := builder.NewRecord()
+	record := builder.NewRecordBatch()
 	defer record.Release()
 
 	// Serialize to Arrow IPC format

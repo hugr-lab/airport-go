@@ -584,8 +584,8 @@ import (
     "log"
     "net"
     
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
     "github.com/hugr-lab/airport-go"
     "google.golang.org/grpc"
 )
@@ -717,10 +717,10 @@ func (s *Server) CatalogVersion() int64
 ## Low-Level API (Advanced)
 
 For advanced use cases requiring direct Flight protocol control.
-This API uses native Arrow Flight types — users must import `github.com/apache/arrow/go/v18/arrow/flight`.
+This API uses native Arrow Flight types — users must import `github.com/apache/arrow-go/v18/arrow/flight`.
 
 ```go
-import "github.com/apache/arrow/go/v18/arrow/flight"
+import "github.com/apache/arrow-go/v18/arrow/flight"
 
 // LowLevelCatalog provides direct Flight protocol access.
 // Implement this instead of Catalog for custom ticket/FlightInfo handling.
@@ -784,8 +784,8 @@ package main
 import (
     "context"
     
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/flight"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/flight"
     "github.com/hugr-lab/airport-go"
 )
 
@@ -951,7 +951,7 @@ airport/
 
 ```go
 require (
-    github.com/apache/arrow/go/v18
+    github.com/apache/arrow-go/v18
     google.golang.org/grpc
     github.com/vmihailenco/msgpack/v5
     github.com/klauspost/compress  // for zstd

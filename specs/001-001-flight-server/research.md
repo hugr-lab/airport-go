@@ -17,7 +17,7 @@ Use Apache Arrow Go v14+ with `BaseFlightServer` embedding pattern.
 
 ### Rationale
 
-- Official Apache Arrow Go SDK (`github.com/apache/arrow/go/v14/arrow/flight`) provides mature, well-tested Flight RPC implementation
+- Official Apache Arrow Go SDK (`github.com/apache/arrow-go/v14/arrow/flight`) provides mature, well-tested Flight RPC implementation
 - BaseFlightServer embedding ensures forward compatibility with Flight protocol changes
 - SDK handles gRPC registration, message serialization, and streaming mechanics automatically
 - Latest versions (v14+, published in 2024) include performance improvements and bug fixes

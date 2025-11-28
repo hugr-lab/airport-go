@@ -3,8 +3,8 @@ package catalog
 import (
 	"context"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
 // Table represents a queryable table or view with fixed schema.

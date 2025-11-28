@@ -3,7 +3,7 @@
 **Package**: `github.com/your-org/airport-go/catalog`
 **Purpose**: Core catalog abstraction interfaces supporting DuckDB Airport Extension protocol
 **Go Version**: 1.23+
-**Arrow Version**: `github.com/apache/arrow/go/v18/arrow`
+**Arrow Version**: `github.com/apache/arrow-go/v18/arrow`
 
 ## Catalog Interface
 
@@ -12,8 +12,8 @@ package catalog
 
 import (
     "context"
-    "github.com/apache/arrow/go/v18/arrow"
-    "github.com/apache/arrow/go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
 )
 
 // Catalog represents the top-level metadata container.

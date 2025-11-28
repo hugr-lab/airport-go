@@ -5,11 +5,12 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net"
 
-	"github.com/apache/arrow/go/v18/arrow"
-	"github.com/apache/arrow/go/v18/arrow/array"
-	"github.com/apache/arrow/go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
 	"github.com/hugr-lab/airport-go"
@@ -32,10 +33,10 @@ func main() {
 		builder.Field(0).(*array.Int64Builder).AppendValues([]int64{1, 2, 3}, nil)
 		builder.Field(1).(*array.StringBuilder).AppendValues([]string{"Alice", "Bob", "Charlie"}, nil)
 
-		record := builder.NewRecord()
+		record := builder.NewRecordBatch()
 		defer record.Release()
 
-		return array.NewRecordReader(userSchema, []arrow.Record{record})
+		return array.NewRecordReader(userSchema, []arrow.RecordBatch{record})
 	}
 
 	// Build catalog with a single schema and table
@@ -55,9 +56,11 @@ func main() {
 	// Create gRPC server
 	grpcServer := grpc.NewServer()
 
-	// Register Airport handlers
+	// Register Airport handlers with debug logging
+	debugLevel := slog.LevelDebug
 	err = airport.NewServer(grpcServer, airport.ServerConfig{
-		Catalog: cat,
+		Catalog:  cat,
+		LogLevel: &debugLevel,
 	})
 	if err != nil {
 		log.Fatalf("Failed to register Airport server: %v", err)
