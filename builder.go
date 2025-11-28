@@ -121,8 +121,8 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 	// Create static catalog and populate it
 	cat := catalog.NewStaticCatalog()
 	for _, sb := range cb.schemas {
-		// Convert tables to static tables
-		tables := make(map[string]*catalog.StaticTable)
+		// Convert tables to catalog.Table interface
+		tables := make(map[string]catalog.Table)
 		for _, tableDef := range sb.tables {
 			tables[tableDef.Name] = catalog.NewStaticTable(
 				tableDef.Name,
@@ -130,6 +130,11 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 				tableDef.Schema,
 				tableDef.ScanFunc,
 			)
+		}
+
+		// Add custom tables directly
+		for _, customTable := range sb.customTables {
+			tables[customTable.Name()] = customTable
 		}
 
 		// Add schema to catalog
@@ -150,6 +155,7 @@ type schemaBuilder struct {
 	name            string
 	comment         string
 	tables          []SimpleTableDef
+	customTables    []catalog.Table
 	scalarFuncs     []catalog.ScalarFunction
 	tableFuncs      []catalog.TableFunction
 	tableFuncsInOut []catalog.TableFunctionInOut
@@ -177,6 +183,19 @@ func (sb *SchemaBuilder) Comment(comment string) *SchemaBuilder {
 //	})
 func (sb *SchemaBuilder) SimpleTable(def SimpleTableDef) *SchemaBuilder {
 	sb.builder.tables = append(sb.builder.tables, def)
+	return sb
+}
+
+// CustomTable adds a custom table implementation to this schema.
+// The table can implement catalog.Table or catalog.DynamicSchemaTable.
+// Returns self for method chaining.
+// Table name MUST be unique within schema.
+//
+// Example:
+//
+//	schema.CustomTable(&MyCustomTable{})
+func (sb *SchemaBuilder) CustomTable(table catalog.Table) *SchemaBuilder {
+	sb.builder.customTables = append(sb.builder.customTables, table)
 	return sb
 }
 

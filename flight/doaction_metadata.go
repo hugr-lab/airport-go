@@ -92,13 +92,15 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 	}
 
 	// Check if table supports dynamic schema (time travel)
-	if dynamicTable, ok := table.(catalog.DynamicSchemaTable); ok && timePoint != nil {
-		// Use SchemaForRequest to get schema at specific time point
-		schemaReq := &catalog.SchemaRequest{
-			TimePoint: timePoint,
+	if timePoint != nil {
+		dynamicTable, ok := table.(catalog.DynamicSchemaTable)
+		if !ok {
+			return status.Errorf(codes.InvalidArgument, "table %s.%s does not support time travel queries", schemaName, tableOrFunctionName)
 		}
-		var err error
-		tableSchema, err = dynamicTable.SchemaForRequest(ctx, schemaReq)
+		// Use SchemaForRequest to get schema at specific time point
+		tableSchema, err = dynamicTable.SchemaForRequest(ctx, &catalog.SchemaRequest{
+			TimePoint: timePoint,
+		})
 		if err != nil {
 			s.logger.Error("Failed to get schema for time point",
 				"error", err,
@@ -110,12 +112,13 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 		s.logger.Debug("Using dynamic schema from SchemaForRequest",
 			"schema_fields", len(tableSchema.Fields()),
 		)
-	} else {
+	}
+	if timePoint == nil {
 		// Regular table - use current schema
 		tableSchema = table.ArrowSchema()
-		if tableSchema == nil {
-			return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", schemaName, tableOrFunctionName)
-		}
+	}
+	if tableSchema == nil {
+		return status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", schemaName, tableOrFunctionName)
 	}
 
 	// Create ticket (time travel handled via ScanOptions in DoGet, not ticket fields)

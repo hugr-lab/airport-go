@@ -339,6 +339,91 @@ func TestDataTypes(t *testing.T) {
 	})
 }
 
+// timeTravelTable implements catalog.DynamicSchemaTable for time travel testing.
+type timeTravelTable struct {
+	name     string
+	comment  string
+	schemaV1 *arrow.Schema
+	schemaV2 *arrow.Schema
+	dataV1   [][]interface{}
+	dataV2   [][]interface{}
+	time2    time.Time
+}
+
+func (t *timeTravelTable) Name() string {
+	return t.name
+}
+
+func (t *timeTravelTable) Comment() string {
+	return t.comment
+}
+
+func (t *timeTravelTable) ArrowSchema() *arrow.Schema {
+	// Return current (latest) schema
+	return t.schemaV2
+}
+
+func (t *timeTravelTable) SchemaForRequest(ctx context.Context, req *catalog.SchemaRequest) (*arrow.Schema, error) {
+	// Return schema based on time point
+	if req.TimePoint != nil {
+		requestTime := t.parseTimePoint(req.TimePoint)
+		if !requestTime.IsZero() && requestTime.Before(t.time2) {
+			return t.schemaV1, nil
+		}
+	}
+	return t.schemaV2, nil
+}
+
+func (t *timeTravelTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+	// Determine which version to return based on timestamp
+	var schema *arrow.Schema
+	var data [][]interface{}
+
+	if opts.TimePoint != nil {
+		requestTime := t.parseTimePoint(opts.TimePoint)
+		if !requestTime.IsZero() && requestTime.Before(t.time2) {
+			// Return v1 data (schema without phone)
+			schema = t.schemaV1
+			data = t.dataV1
+		} else {
+			// Return v2 data (schema with phone)
+			schema = t.schemaV2
+			data = t.dataV2
+		}
+	} else {
+		// No time specified - return current/latest data
+		schema = t.schemaV2
+		data = t.dataV2
+	}
+
+	record := buildTestRecord(schema, data)
+	defer record.Release()
+	return array.NewRecordReader(schema, []arrow.RecordBatch{record})
+}
+
+func (t *timeTravelTable) parseTimePoint(tp *catalog.TimePoint) time.Time {
+	switch tp.Unit {
+	case "timestamp", "version", "TIMESTAMP", "VERSION":
+		// Try parsing as timestamp string first (e.g., "2024-01-01 00:00:00")
+		parsedTime, err := time.Parse("2006-01-02 15:04:05", tp.Value)
+		if err == nil {
+			return parsedTime.UTC()
+		}
+		// Fallback: parse as Unix seconds epoch
+		var ts int64
+		if _, err := fmt.Sscanf(tp.Value, "%d", &ts); err == nil {
+			return time.Unix(ts, 0).UTC()
+		}
+	case "timestamp_ns", "TIMESTAMP_NS":
+		// Parse nanoseconds since epoch
+		var tsNs int64
+		if _, err := fmt.Sscanf(tp.Value, "%d", &tsNs); err == nil {
+			return time.Unix(0, tsNs).UTC()
+		}
+	}
+	return time.Time{}
+}
+
 // timeTravelCatalog creates a catalog with versioned data for time travel testing.
 // The catalog has data at two different time points with schema evolution.
 func timeTravelCatalog() catalog.Catalog {
@@ -377,64 +462,22 @@ func timeTravelCatalog() catalog.Catalog {
 		{int64(4), "David", "david@example.com", "555-0004"}, // New user
 	}
 
-	// Create scan function that respects time travel
-	scanFunc := func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
-		// Determine which version to return based on timestamp
-		var schema *arrow.Schema
-		var data [][]interface{}
-
-		if opts.TimePoint != nil {
-			// Parse the timestamp from TimePoint
-			// TimePoint.Value is a string representation of Unix timestamp
-			var requestTime time.Time
-
-			switch opts.TimePoint.Unit {
-			case "timestamp":
-				// Parse seconds since epoch
-				var ts int64
-				_, err := fmt.Sscanf(opts.TimePoint.Value, "%d", &ts)
-				if err == nil {
-					requestTime = time.Unix(ts, 0).UTC()
-				}
-			case "timestamp_ns":
-				// Parse nanoseconds since epoch
-				var tsNs int64
-				_, err := fmt.Sscanf(opts.TimePoint.Value, "%d", &tsNs)
-				if err == nil {
-					requestTime = time.Unix(0, tsNs).UTC()
-				}
-			}
-
-			if !requestTime.IsZero() && requestTime.Before(time2) {
-				// Return v1 data (schema without phone)
-				schema = schemaV1
-				data = dataV1
-			} else {
-				// Return v2 data (schema with phone)
-				schema = schemaV2
-				data = dataV2
-			}
-		} else {
-			// No time specified - return current/latest data
-			schema = schemaV2
-			data = dataV2
-		}
-
-		record := buildTestRecord(schema, data)
-		defer record.Release()
-		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
+	// Create custom time travel table
+	ttTable := &timeTravelTable{
+		name:     "versioned_users",
+		comment:  "User table with schema evolution (phone added in v2)",
+		schemaV1: schemaV1,
+		schemaV2: schemaV2,
+		dataV1:   dataV1,
+		dataV2:   dataV2,
+		time2:    time2,
 	}
 
-	// Build catalog with time-aware table
+	// Build catalog with custom table
 	cat, err := airport.NewCatalogBuilder().
 		Schema("versioned_schema").
 		Comment("Schema with time travel support").
-		SimpleTable(airport.SimpleTableDef{
-			Name:     "versioned_users",
-			Comment:  "User table with schema evolution (phone added in v2)",
-			Schema:   schemaV2, // Current schema
-			ScanFunc: scanFunc,
-		}).
+		CustomTable(ttTable).
 		Build()
 
 	if err != nil {

@@ -22,7 +22,8 @@ func NewStaticCatalog() *staticCatalog {
 
 // AddSchema adds a schema to the static catalog.
 // This is used during catalog building.
-func (c *staticCatalog) AddSchema(name, comment string, tables map[string]*StaticTable, scalarFuncs []ScalarFunction, tableFuncs []TableFunction, tableFuncsInOut []TableFunctionInOut) {
+// Tables can be any implementation of the Table interface, including DynamicSchemaTable.
+func (c *staticCatalog) AddSchema(name, comment string, tables map[string]Table, scalarFuncs []ScalarFunction, tableFuncs []TableFunction, tableFuncsInOut []TableFunctionInOut) {
 	c.schemas[name] = &staticSchema{
 		name:            name,
 		comment:         comment,
@@ -66,7 +67,7 @@ func (c *staticCatalog) Schema(ctx context.Context, name string) (Schema, error)
 type staticSchema struct {
 	name            string
 	comment         string
-	tables          map[string]*StaticTable
+	tables          map[string]Table
 	scalarFuncs     []ScalarFunction
 	tableFuncs      []TableFunction
 	tableFuncsInOut []TableFunctionInOut
