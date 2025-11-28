@@ -689,4 +689,78 @@ func TestTimeTravelQueries(t *testing.T) {
 			t.Errorf("Expected 4 users at time2, got %d", count2)
 		}
 	})
+
+	// Test 7: Query at version 1 (equivalent to time1)
+	t.Run("QueryAtVersion1", func(t *testing.T) {
+		// Version 1 = 1704067200 (2024-01-01 00:00:00 UTC in Unix seconds)
+		query := "SELECT id, name, email FROM " + attachName + ".versioned_schema.versioned_users AT (VERSION => 1704067200) ORDER BY id"
+		rows, err := db.Query(query)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		defer rows.Close()
+
+		var count int
+		for rows.Next() {
+			var id int64
+			var name, email string
+			if err := rows.Scan(&id, &name, &email); err != nil {
+				t.Fatalf("Failed to scan: %v", err)
+			}
+			count++
+		}
+
+		if count != 3 {
+			t.Errorf("Expected 3 users at version 1, got %d", count)
+		}
+	})
+
+	// Test 8: Query at version 2 (equivalent to time2)
+	t.Run("QueryAtVersion2", func(t *testing.T) {
+		// Version 2 = 1717200000 (2024-06-01 00:00:00 UTC in Unix seconds)
+		query := "SELECT id, name, email, phone FROM " + attachName + ".versioned_schema.versioned_users AT (VERSION => 1717200000) ORDER BY id"
+		rows, err := db.Query(query)
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		defer rows.Close()
+
+		var count int
+		for rows.Next() {
+			var id int64
+			var name, email, phone string
+			if err := rows.Scan(&id, &name, &email, &phone); err != nil {
+				t.Fatalf("Failed to scan: %v", err)
+			}
+			count++
+		}
+
+		if count != 4 {
+			t.Errorf("Expected 4 users at version 2, got %d", count)
+		}
+	})
+
+	// Test 9: Count with VERSION syntax
+	t.Run("CountUsersWithVersion", func(t *testing.T) {
+		// Count at version 1 (should be 3)
+		query1 := "SELECT COUNT(id) FROM " + attachName + ".versioned_schema.versioned_users AT (VERSION => 1704067200)"
+		var count1 int64
+		if err := db.QueryRow(query1).Scan(&count1); err != nil {
+			t.Fatalf("Query1 failed: %v", err)
+		}
+
+		// Count at version 2 (should be 4)
+		query2 := "SELECT COUNT(id) FROM " + attachName + ".versioned_schema.versioned_users AT (VERSION => 1717200000)"
+		var count2 int64
+		if err := db.QueryRow(query2).Scan(&count2); err != nil {
+			t.Fatalf("Query2 failed: %v", err)
+		}
+
+		if count1 != 3 {
+			t.Errorf("Expected 3 users at version 1, got %d", count1)
+		}
+		if count2 != 4 {
+			t.Errorf("Expected 4 users at version 2, got %d", count2)
+		}
+	})
 }
