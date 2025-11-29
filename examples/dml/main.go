@@ -241,9 +241,11 @@ func NewUsersTable() *UsersTable {
 
 // Table interface implementation
 
-func (t *UsersTable) Name() string               { return "users" }
-func (t *UsersTable) Comment() string            { return "Writable users table with DML and transaction support" }
-func (t *UsersTable) ArrowSchema() *arrow.Schema { return t.schema }
+func (t *UsersTable) Name() string    { return "users" }
+func (t *UsersTable) Comment() string { return "Writable users table with DML and transaction support" }
+func (t *UsersTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
+}
 
 func (t *UsersTable) Scan(_ context.Context, _ *catalog.ScanOptions) (array.RecordReader, error) {
 	t.mu.RLock()

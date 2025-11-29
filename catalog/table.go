@@ -20,14 +20,20 @@ type Table interface {
 	Comment() string
 
 	// ArrowSchema returns the logical schema describing table columns.
+	// If columns is nil or empty, returns full schema.
+	// If columns is provided, returns projected schema with only those columns.
+	// Column order in the returned schema matches the order in columns slice.
 	// Returns nil if schema is dynamic (see DynamicSchemaTable interface).
 	// If non-nil, MUST return valid *arrow.Schema.
-	ArrowSchema() *arrow.Schema
+	ArrowSchema(columns []string) *arrow.Schema
 
 	// Scan executes a scan operation and returns a RecordReader.
 	// Context allows cancellation; implementation MUST respect ctx.Done().
 	// Caller MUST call reader.Release() to free memory.
-	// Returned RecordReader schema MUST match ArrowSchema() (if non-nil).
+	// If opts.Columns is specified, implementation MAY return either:
+	//   - Full schema records (server will apply projection)
+	//   - Projected schema records (optimization)
+	// Either way, returned data will match what client expects.
 	Scan(ctx context.Context, opts *ScanOptions) (array.RecordReader, error)
 }
 

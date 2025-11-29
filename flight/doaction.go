@@ -226,7 +226,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 
 	// Serialize tables
 	for _, table := range tables {
-		arrowSchema := table.ArrowSchema()
+		arrowSchema := table.ArrowSchema(nil)
 		if arrowSchema == nil {
 			continue
 		}

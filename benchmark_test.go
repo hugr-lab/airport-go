@@ -339,8 +339,8 @@ func (t *benchTable) Comment() string {
 	return ""
 }
 
-func (t *benchTable) ArrowSchema() *arrow.Schema {
-	return t.schema
+func (t *benchTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
 }
 
 func (t *benchTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {

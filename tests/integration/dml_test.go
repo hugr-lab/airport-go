@@ -947,9 +947,11 @@ func (t *duckDBDMLTable) EnableReturning() {
 	t.enableReturning = true
 }
 
-func (t *duckDBDMLTable) Name() string               { return t.tableName }
-func (t *duckDBDMLTable) Comment() string            { return "In-memory DML table with rowid" }
-func (t *duckDBDMLTable) ArrowSchema() *arrow.Schema { return t.schema }
+func (t *duckDBDMLTable) Name() string    { return t.tableName }
+func (t *duckDBDMLTable) Comment() string { return "In-memory DML table with rowid" }
+func (t *duckDBDMLTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
+}
 
 func (t *duckDBDMLTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	t.mu.RLock()

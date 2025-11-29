@@ -121,7 +121,9 @@ func NewUsersTableWithProjection() *UsersTableWithProjection {
 
 func (t *UsersTableWithProjection) Name() string               { return "users" }
 func (t *UsersTableWithProjection) Comment() string            { return "Sample user data with column projection support" }
-func (t *UsersTableWithProjection) ArrowSchema() *arrow.Schema { return t.schema }
+func (t *UsersTableWithProjection) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
+}
 
 func (t *UsersTableWithProjection) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	// Handle column projection

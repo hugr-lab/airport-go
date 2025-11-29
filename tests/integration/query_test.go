@@ -358,9 +358,9 @@ func (t *timeTravelTable) Comment() string {
 	return t.comment
 }
 
-func (t *timeTravelTable) ArrowSchema() *arrow.Schema {
-	// Return current (latest) schema
-	return t.schemaV2
+func (t *timeTravelTable) ArrowSchema(columns []string) *arrow.Schema {
+	// Return current (latest) schema with optional projection
+	return catalog.ProjectSchema(t.schemaV2, columns)
 }
 
 func (t *timeTravelTable) SchemaForRequest(ctx context.Context, req *catalog.SchemaRequest) (*arrow.Schema, error) {

@@ -141,7 +141,9 @@ func NewTimeTravelUsersTable() *TimeTravelUsersTable {
 
 func (t *TimeTravelUsersTable) Name() string               { return "users" }
 func (t *TimeTravelUsersTable) Comment() string            { return "Users table with time travel support (versions 1-3)" }
-func (t *TimeTravelUsersTable) ArrowSchema() *arrow.Schema { return t.schema }
+func (t *TimeTravelUsersTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
+}
 
 func (t *TimeTravelUsersTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	// Determine which version to query

@@ -183,7 +183,7 @@ func TestStaticTableProperties(t *testing.T) {
 		t.Errorf("Expected comment 'User accounts', got '%s'", table.Comment())
 	}
 
-	if table.ArrowSchema() != arrowSchema {
+	if table.ArrowSchema(nil) != arrowSchema {
 		t.Error("Arrow schema mismatch")
 	}
 }

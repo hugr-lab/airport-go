@@ -3,6 +3,7 @@ package airport_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -56,6 +57,12 @@ func TestTableColumnProjection(t *testing.T) {
 		if count != 3 {
 			t.Errorf("expected 3 rows, got %d", count)
 		}
+
+		// Verify scan was called
+		t.Logf("SelectAllColumns: scanCount=%d, requestedCols=%v", table.scanCount, table.requestedCols)
+		if table.scanCount == 0 {
+			t.Errorf("Scan was never called")
+		}
 	})
 
 	t.Run("SelectSingleColumn", func(t *testing.T) {
@@ -97,6 +104,17 @@ func TestTableColumnProjection(t *testing.T) {
 				t.Errorf("row %d: expected '%s', got '%s'", i, expected[i], name)
 			}
 		}
+
+		// Verify column projection was passed to Scan
+		t.Logf("SelectSingleColumn: scanCount=%d, requestedCols=%v", table.scanCount, table.requestedCols)
+		if table.scanCount == 0 {
+			t.Fatalf("Scan was never called")
+		}
+		// We expect only "name" column to be requested for projection pushdown
+		wantCols := []string{"name"}
+		if !slices.Equal(table.requestedCols, wantCols) {
+			t.Errorf("Column projection not working: got %v, want %v", table.requestedCols, wantCols)
+		}
 	})
 
 	t.Run("SelectMultipleColumns", func(t *testing.T) {
@@ -133,6 +151,17 @@ func TestTableColumnProjection(t *testing.T) {
 		}
 		if count != 3 {
 			t.Errorf("expected 3 rows, got %d", count)
+		}
+
+		// Verify column projection was passed to Scan
+		t.Logf("SelectMultipleColumns: scanCount=%d, requestedCols=%v", table.scanCount, table.requestedCols)
+		if table.scanCount == 0 {
+			t.Fatalf("Scan was never called")
+		}
+		// We expect only "id" and "email" columns to be requested
+		wantCols := []string{"id", "email"}
+		if !slices.Equal(table.requestedCols, wantCols) {
+			t.Errorf("Column projection not working: got %v, want %v", table.requestedCols, wantCols)
 		}
 	})
 
@@ -323,72 +352,35 @@ func (t *projectionTestTable) Reset() {
 
 func (t *projectionTestTable) Name() string               { return "data" }
 func (t *projectionTestTable) Comment() string            { return "Test table for column projection" }
-func (t *projectionTestTable) ArrowSchema() *arrow.Schema { return t.schema }
+func (t *projectionTestTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
+}
 
 func (t *projectionTestTable) Scan(_ context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	t.scanCount++
 
-	// Track requested columns
+	// Track requested columns for test verification
 	if opts != nil && len(opts.Columns) > 0 {
 		t.requestedCols = opts.Columns
 	} else {
 		t.requestedCols = []string{"*"}
 	}
 
-	// Handle column projection
-	outputSchema, columnIndices := t.projectColumns(opts)
-
-	// Build record with projected columns
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, outputSchema)
+	// Note: DuckDB expects full schema - it handles projection client-side.
+	// The column projection info is a hint for optimization (e.g., skip fetching
+	// columns from a database), but the returned schema must match ArrowSchema().
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, t.schema)
 	defer builder.Release()
 
 	for _, row := range t.data {
-		for outIdx, srcIdx := range columnIndices {
-			switch v := row[srcIdx].(type) {
-			case int64:
-				builder.Field(outIdx).(*array.Int64Builder).Append(v)
-			case string:
-				builder.Field(outIdx).(*array.StringBuilder).Append(v)
-			}
-		}
+		builder.Field(0).(*array.Int64Builder).Append(row[0].(int64))
+		builder.Field(1).(*array.StringBuilder).Append(row[1].(string))
+		builder.Field(2).(*array.StringBuilder).Append(row[2].(string))
+		builder.Field(3).(*array.Int64Builder).Append(row[3].(int64))
 	}
 
 	record := builder.NewRecordBatch()
-	return array.NewRecordReader(outputSchema, []arrow.RecordBatch{record})
-}
-
-func (t *projectionTestTable) projectColumns(opts *catalog.ScanOptions) (*arrow.Schema, []int) {
-	if opts == nil || len(opts.Columns) == 0 {
-		indices := make([]int, t.schema.NumFields())
-		for i := range indices {
-			indices[i] = i
-		}
-		return t.schema, indices
-	}
-
-	colIndex := make(map[string]int)
-	for i := 0; i < t.schema.NumFields(); i++ {
-		colIndex[t.schema.Field(i).Name] = i
-	}
-
-	var fields []arrow.Field
-	var indices []int
-	for _, col := range opts.Columns {
-		if idx, ok := colIndex[col]; ok {
-			fields = append(fields, t.schema.Field(idx))
-			indices = append(indices, idx)
-		}
-	}
-
-	if len(fields) == 0 {
-		indices = make([]int, t.schema.NumFields())
-		for i := range indices {
-			indices[i] = i
-		}
-		return t.schema, indices
-	}
-
-	return arrow.NewSchema(fields, nil), indices
+	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }
 
 func projectionTestCatalog(t *testing.T, table *projectionTestTable) catalog.Catalog {
@@ -445,31 +437,32 @@ func (f *generateRangeWithProjection) SchemaForParameters(_ context.Context, par
 	return arrow.NewSchema(fields, nil), nil
 }
 
-func (f *generateRangeWithProjection) Execute(ctx context.Context, params []any, opts *catalog.ScanOptions) (array.RecordReader, error) {
+func (f *generateRangeWithProjection) Execute(ctx context.Context, params []any, _ *catalog.ScanOptions) (array.RecordReader, error) {
 	start := toInt64Value(params[0])
 	stop := toInt64Value(params[1])
+	columnCount := toInt64Value(params[2])
 
 	fullSchema, err := f.SchemaForParameters(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Handle column projection
-	outputSchema, columnIndices := projectSchemaColumns(fullSchema, opts)
-
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, outputSchema)
+	// Note: DuckDB expects full schema - it handles projection client-side.
+	// The column projection info is a hint for optimization (e.g., skip fetching
+	// columns from a database), but the returned schema must match SchemaForParameters().
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, fullSchema)
 	defer builder.Release()
 
 	for i := start; i <= stop; i++ {
-		for outIdx, srcColIdx := range columnIndices {
+		for col := int64(0); col < columnCount; col++ {
 			// Value = row * (column_number)
-			value := i * int64(srcColIdx+1)
-			builder.Field(outIdx).(*array.Int64Builder).Append(value)
+			value := i * (col + 1)
+			builder.Field(int(col)).(*array.Int64Builder).Append(value)
 		}
 	}
 
 	record := builder.NewRecordBatch()
-	return array.NewRecordReader(outputSchema, []arrow.RecordBatch{record})
+	return array.NewRecordReader(fullSchema, []arrow.RecordBatch{record})
 }
 
 func tableFunctionProjectionCatalog(t *testing.T) catalog.Catalog {
@@ -497,36 +490,3 @@ func toInt64Value(v any) int64 {
 	}
 }
 
-func projectSchemaColumns(schema *arrow.Schema, opts *catalog.ScanOptions) (*arrow.Schema, []int) {
-	if opts == nil || len(opts.Columns) == 0 {
-		indices := make([]int, schema.NumFields())
-		for i := range indices {
-			indices[i] = i
-		}
-		return schema, indices
-	}
-
-	colIndex := make(map[string]int)
-	for i := 0; i < schema.NumFields(); i++ {
-		colIndex[schema.Field(i).Name] = i
-	}
-
-	var fields []arrow.Field
-	var indices []int
-	for _, col := range opts.Columns {
-		if idx, ok := colIndex[col]; ok {
-			fields = append(fields, schema.Field(idx))
-			indices = append(indices, idx)
-		}
-	}
-
-	if len(fields) == 0 {
-		indices = make([]int, schema.NumFields())
-		for i := range indices {
-			indices[i] = i
-		}
-		return schema, indices
-	}
-
-	return arrow.NewSchema(fields, nil), indices
-}

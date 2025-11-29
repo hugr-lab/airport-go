@@ -144,8 +144,8 @@ func (t *liveTable) Comment() string {
 	return t.comment
 }
 
-func (t *liveTable) ArrowSchema() *arrow.Schema {
-	return t.schema
+func (t *liveTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(t.schema, columns)
 }
 
 func (t *liveTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
