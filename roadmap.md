@@ -27,6 +27,7 @@
 ## Next: 003-ddl-operations
 
 DDL operations implementation:
+(Use the proper action names as per the reference link)
 
 - [ ] CreateSchema, DropSchema actions
 - [ ] CreateTable, DropTable actions

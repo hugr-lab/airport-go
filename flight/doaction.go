@@ -40,9 +40,39 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 	case "flight_info":
 		return s.handleFlightInfo(ctx, action, stream)
 
-	// DDL operations
-	case "CreateSchema", "DropSchema", "CreateTable", "DropTable", "AlterTableAddColumn", "AlterTableDropColumn":
-		return s.handleDDLAction(action, stream)
+	// DDL operations (snake_case per Airport protocol)
+	case "create_schema":
+		return s.handleCreateSchemaAction(ctx, action, stream)
+	case "drop_schema":
+		return s.handleDropSchemaAction(ctx, action, stream)
+	case "create_table":
+		return s.handleCreateTableAction(ctx, action, stream)
+	case "drop_table":
+		return s.handleDropTableAction(ctx, action, stream)
+	case "add_column":
+		return s.handleAddColumnAction(ctx, action, stream)
+	case "remove_column":
+		return s.handleRemoveColumnAction(ctx, action, stream)
+	case "rename_column":
+		return s.handleRenameColumnAction(ctx, action, stream)
+	case "rename_table":
+		return s.handleRenameTableAction(ctx, action, stream)
+	case "change_column_type":
+		return s.handleChangeColumnTypeAction(ctx, action, stream)
+	case "set_not_null":
+		return s.handleSetNotNullAction(ctx, action, stream)
+	case "drop_not_null":
+		return s.handleDropNotNullAction(ctx, action, stream)
+	case "set_default":
+		return s.handleSetDefaultAction(ctx, action, stream)
+	case "add_field":
+		return s.handleAddFieldAction(ctx, action, stream)
+	case "rename_field":
+		return s.handleRenameFieldAction(ctx, action, stream)
+
+	// Catalog version action
+	case "catalog_version":
+		return s.handleCatalogVersionAction(ctx, action, stream)
 
 	// Required Airport actions
 	case "list_schemas":
