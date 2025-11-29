@@ -65,15 +65,12 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	if ticketData.TableFunction != "" {
 		// Handle table function execution
 		reader, readerSchema, err = s.executeTableFunction(ctx, schema, ticketData)
-		if err != nil {
-			return err // Error already formatted
-		}
 	} else {
 		// Handle regular table scan
 		reader, readerSchema, err = s.executeTableScan(ctx, schema, ticketData)
-		if err != nil {
-			return err // Error already formatted
-		}
+	}
+	if err != nil {
+		return err // Error already formatted
 	}
 	defer reader.Release()
 
@@ -176,9 +173,12 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 		return nil, nil, status.Errorf(codes.NotFound, "table not found: %s.%s", ticketData.Schema, ticketData.Table)
 	}
 
-	// Get table's Arrow schema for validation
-	tableSchema := table.ArrowSchema()
-	if tableSchema == nil {
+	// Convert ticket data to scan options (includes time-travel parameters and columns)
+	scanOpts := ticketData.ToScanOptions()
+
+	// Get table's full Arrow schema (nil = no projection, DuckDB expects full schema in DoGet)
+	fullSchema := table.ArrowSchema(nil)
+	if fullSchema == nil {
 		s.logger.Error("Table returned nil Arrow schema",
 			"schema", ticketData.Schema,
 			"table", ticketData.Table,
@@ -186,8 +186,14 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 		return nil, nil, status.Errorf(codes.Internal, "table %s.%s has nil Arrow schema", ticketData.Schema, ticketData.Table)
 	}
 
-	// Convert ticket data to scan options (includes time-travel parameters)
-	scanOpts := ticketData.ToScanOptions()
+	// Log column projection hint (passed to table for optimization)
+	if len(scanOpts.Columns) > 0 {
+		s.logger.Debug("Column projection hint",
+			"schema", ticketData.Schema,
+			"table", ticketData.Table,
+			"columns", scanOpts.Columns,
+		)
+	}
 
 	// Log time-travel query if timestamp parameters present
 	if scanOpts.TimePoint != nil {
@@ -200,6 +206,8 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 	}
 
 	// Call table's Scan function to get RecordReader
+	// Table can use scanOpts.Columns to optimize (e.g., only fetch needed columns from DB)
+	// but must return full schema - DuckDB handles projection client-side
 	reader, err := table.Scan(ctx, scanOpts)
 	if err != nil {
 		s.logger.Error("Table scan failed",
@@ -211,19 +219,19 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 	}
 
 	// Validate RecordReader schema matches table schema
-	// For time-travel queries, schema may differ from current schema, so skip validation
+	// Skip validation for time-travel queries (schema may differ from current schema)
 	readerSchema := reader.Schema()
-	if scanOpts.TimePoint == nil && !tableSchema.Equal(readerSchema) {
+	if scanOpts.TimePoint == nil && !fullSchema.Equal(readerSchema) {
 		reader.Release()
 		s.logger.Error("RecordReader schema does not match table schema",
 			"schema", ticketData.Schema,
 			"table", ticketData.Table,
-			"table_schema_fields", tableSchema.NumFields(),
+			"table_schema_fields", fullSchema.NumFields(),
 			"reader_schema_fields", readerSchema.NumFields(),
 		)
 		return nil, nil, status.Errorf(codes.Internal,
 			"schema mismatch: table has %d fields, reader has %d fields",
-			tableSchema.NumFields(), readerSchema.NumFields())
+			fullSchema.NumFields(), readerSchema.NumFields())
 	}
 
 	// For time-travel queries, use the reader's schema (which reflects historical state)
@@ -232,11 +240,12 @@ func (s *Server) executeTableScan(ctx context.Context, schema catalog.Schema, ti
 			"schema", ticketData.Schema,
 			"table", ticketData.Table,
 			"reader_fields", readerSchema.NumFields(),
-			"current_table_fields", tableSchema.NumFields(),
+			"current_table_fields", fullSchema.NumFields(),
 		)
+		return reader, readerSchema, nil
 	}
 
-	return reader, readerSchema, nil
+	return reader, fullSchema, nil
 }
 
 // executeTableFunction handles table function execution with dynamic schemas.
@@ -271,8 +280,8 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 		"param_count", len(ticketData.FunctionParams),
 	)
 
-	// Get the schema for these parameters (dynamic schema based on params)
-	funcSchema, err := targetFunc.SchemaForParameters(ctx, ticketData.FunctionParams)
+	// Get the full schema for these parameters (dynamic schema based on params)
+	fullSchema, err := targetFunc.SchemaForParameters(ctx, ticketData.FunctionParams)
 	if err != nil {
 		s.logger.Error("Failed to get function schema",
 			"schema", ticketData.Schema,
@@ -282,16 +291,27 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 		return nil, nil, status.Errorf(codes.Internal, "failed to get function schema: %v", err)
 	}
 
+	// Convert ticket data to scan options (includes column projection hint)
+	scanOpts := ticketData.ToScanOptions()
+
+	// Log column projection hint (passed to function for optimization)
+	if len(scanOpts.Columns) > 0 {
+		s.logger.Debug("Table function column projection hint",
+			"schema", ticketData.Schema,
+			"function", ticketData.TableFunction,
+			"columns", scanOpts.Columns,
+		)
+	}
+
 	s.logger.Debug("Table function schema determined",
 		"schema", ticketData.Schema,
 		"function", ticketData.TableFunction,
-		"output_fields", funcSchema.NumFields(),
+		"output_fields", fullSchema.NumFields(),
 	)
 
-	// Convert ticket data to scan options
-	scanOpts := ticketData.ToScanOptions()
-
 	// Execute the table function
+	// Function can use scanOpts.Columns to optimize (e.g., skip computing unused columns)
+	// but must return full schema - DuckDB handles projection client-side
 	reader, err := targetFunc.Execute(ctx, ticketData.FunctionParams, scanOpts)
 	if err != nil {
 		s.logger.Error("Table function execution failed",
@@ -304,18 +324,18 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 
 	// Validate reader schema matches function's declared schema
 	readerSchema := reader.Schema()
-	if !funcSchema.Equal(readerSchema) {
+	if !fullSchema.Equal(readerSchema) {
 		reader.Release()
 		s.logger.Error("RecordReader schema does not match function schema",
 			"schema", ticketData.Schema,
 			"function", ticketData.TableFunction,
-			"function_schema_fields", funcSchema.NumFields(),
+			"function_schema_fields", fullSchema.NumFields(),
 			"reader_schema_fields", readerSchema.NumFields(),
 		)
 		return nil, nil, status.Errorf(codes.Internal,
 			"schema mismatch: function declared %d fields, reader has %d fields",
-			funcSchema.NumFields(), readerSchema.NumFields())
+			fullSchema.NumFields(), readerSchema.NumFields())
 	}
 
-	return reader, readerSchema, nil
+	return reader, fullSchema, nil
 }

@@ -78,3 +78,52 @@ type FunctionSignature struct {
 // ScanFunc is a function type for table data retrieval.
 // User implements this to connect to their data source.
 type ScanFunc func(ctx context.Context, opts *ScanOptions) (array.RecordReader, error)
+
+// DMLResult holds the outcome of INSERT, UPDATE, or DELETE operations.
+// Returned by InsertableTable.Insert, UpdatableTable.Update, and DeletableTable.Delete.
+type DMLResult struct {
+	// AffectedRows is the count of rows inserted, updated, or deleted.
+	// For INSERT: number of rows successfully inserted.
+	// For UPDATE: number of rows matched and modified.
+	// For DELETE: number of rows removed.
+	AffectedRows int64
+
+	// ReturningData contains rows affected by the operation when
+	// a RETURNING clause was specified. nil if no RETURNING requested.
+	// Caller is responsible for releasing resources (RecordReader.Release).
+	ReturningData array.RecordReader
+}
+
+// ProjectSchema returns a projected schema containing only the specified columns.
+// If columns is nil or empty, returns the full schema unchanged.
+// Column order in the returned schema matches the order in columns slice.
+// Original schema metadata is preserved in the projected schema.
+// This is a helper function for implementing Table.ArrowSchema(columns).
+func ProjectSchema(schema *arrow.Schema, columns []string) *arrow.Schema {
+	if len(columns) == 0 {
+		return schema
+	}
+
+	// Build column name to index map
+	colIndex := make(map[string]int, schema.NumFields())
+	for i := 0; i < schema.NumFields(); i++ {
+		colIndex[schema.Field(i).Name] = i
+	}
+
+	// Select only requested columns in order
+	fields := make([]arrow.Field, 0, len(columns))
+	for _, col := range columns {
+		if idx, ok := colIndex[col]; ok {
+			fields = append(fields, schema.Field(idx))
+		}
+	}
+
+	if len(fields) == 0 {
+		// No matching columns - return original schema
+		return schema
+	}
+
+	// Preserve original schema metadata
+	meta := schema.Metadata()
+	return arrow.NewSchema(fields, &meta)
+}

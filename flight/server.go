@@ -20,6 +20,7 @@ type Server struct {
 	allocator memory.Allocator
 	logger    *slog.Logger
 	address   string // Server's public address for FlightEndpoint locations
+	txManager catalog.TransactionManager // Optional transaction coordinator
 }
 
 // NewServer creates a new Flight server with the given catalog and allocator.
@@ -32,6 +33,25 @@ func NewServer(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Log
 		logger:    logger,
 		address:   address,
 	}
+}
+
+// NewServerWithTxManager creates a new Flight server with transaction management support.
+// The txManager parameter is optional - if nil, operations execute without transaction coordination.
+func NewServerWithTxManager(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Logger, address string, txManager catalog.TransactionManager) *Server {
+	return &Server{
+		catalog:   cat,
+		allocator: allocator,
+		logger:    logger,
+		address:   address,
+		txManager: txManager,
+	}
+}
+
+// SetTransactionManager sets the transaction manager for the server.
+// This allows adding transaction support after server creation.
+// Can be set to nil to disable transaction coordination.
+func (s *Server) SetTransactionManager(txManager catalog.TransactionManager) {
+	s.txManager = txManager
 }
 
 // RegisterFlightServer registers the Flight service on the provided gRPC server.

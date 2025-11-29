@@ -67,8 +67,13 @@ func NewServer(grpcServer *grpc.Server, config ServerConfig) error {
 		logger = slog.New(handler)
 	}
 
-	// Create Flight server
-	flightServer := flight.NewServer(config.Catalog, allocator, logger, config.Address)
+	// Create Flight server with optional transaction manager
+	var flightServer *flight.Server
+	if config.TransactionManager != nil {
+		flightServer = flight.NewServerWithTxManager(config.Catalog, allocator, logger, config.Address, config.TransactionManager)
+	} else {
+		flightServer = flight.NewServer(config.Catalog, allocator, logger, config.Address)
+	}
 
 	// Register Flight service
 	flight.RegisterFlightServer(grpcServer, flightServer)
@@ -76,6 +81,7 @@ func NewServer(grpcServer *grpc.Server, config ServerConfig) error {
 	// Log successful registration
 	logger.Info("Airport Flight server registered",
 		"has_auth", config.Auth != nil,
+		"has_tx_manager", config.TransactionManager != nil,
 		"max_message_size", config.MaxMessageSize,
 	)
 

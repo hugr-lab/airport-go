@@ -186,15 +186,15 @@ func (sb *SchemaBuilder) SimpleTable(def SimpleTableDef) *SchemaBuilder {
 	return sb
 }
 
-// CustomTable adds a custom table implementation to this schema.
+// Table adds a custom table implementation to this schema.
 // The table can implement catalog.Table or catalog.DynamicSchemaTable.
 // Returns self for method chaining.
 // Table name MUST be unique within schema.
 //
 // Example:
 //
-//	schema.CustomTable(&MyCustomTable{})
-func (sb *SchemaBuilder) CustomTable(table catalog.Table) *SchemaBuilder {
+//	schema.Table(&MyCustomTable{})
+func (sb *SchemaBuilder) Table(table catalog.Table) *SchemaBuilder {
 	sb.builder.customTables = append(sb.builder.customTables, table)
 	return sb
 }

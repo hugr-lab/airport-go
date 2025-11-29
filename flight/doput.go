@@ -2,11 +2,9 @@ package flight
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 
 	"github.com/apache/arrow-go/v18/arrow/flight"
-	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -99,22 +97,7 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 	s.logger.Debug("Processing DoPut command", "cmd_size", len(cmd))
 
-	// Try to detect if this is a DML operation by checking for JSON structure
-	// DML descriptors have schema_name and table_name fields
-	var dmlCheck map[string]interface{}
-	if err := json.Unmarshal(cmd, &dmlCheck); err == nil {
-		// Successfully parsed as JSON - check if it's a DML operation
-		if operation, ok := dmlCheck["operation"].(string); ok {
-			switch operation {
-			case "insert":
-				return s.handleDoPutInsert(dmlCheck, stream)
-			case "update":
-				return s.handleDoPutUpdate(dmlCheck, stream)
-			}
-		}
-	}
-
-	// Not a DML operation - try MessagePack parameters (T053 - parameter validation)
+	// Try MessagePack parameters (T053 - parameter validation)
 	params, err := msgpack.DecodeMap(cmd)
 	if err != nil {
 		s.logger.Error("Failed to decode MessagePack parameters",
@@ -128,9 +111,9 @@ func (s *Server) handleDoPutCommand(ctx context.Context, descriptor *flight.Flig
 
 	// Read Arrow data from stream if present
 	var recordCount int64
-	reader, err := ipc.NewReader(newFlightDataReader(msg, stream))
+	reader, err := flight.NewRecordReader(newFlightDataReader(msg, stream))
 	if err != nil {
-		s.logger.Error("Failed to create IPC reader", "error", err)
+		s.logger.Error("Failed to create record reader", "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create reader: %v", err)
 	}
 	defer reader.Release()
@@ -181,9 +164,9 @@ func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightD
 
 	// Read Arrow data from stream
 	var recordCount int64
-	reader, err := ipc.NewReader(newFlightDataReader(msg, stream))
+	reader, err := flight.NewRecordReader(newFlightDataReader(msg, stream))
 	if err != nil {
-		s.logger.Error("Failed to create IPC reader", "error", err)
+		s.logger.Error("Failed to create record reader", "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to create reader: %v", err)
 	}
 	defer reader.Release()
@@ -218,100 +201,34 @@ func (s *Server) handleDoPutPath(ctx context.Context, descriptor *flight.FlightD
 	}, nil
 }
 
-// flightDataReader adapts FlightData stream to io.Reader for IPC reader.
-type flightDataReader struct {
+// doPutDataStream wraps a DoPut stream with a prepended first message.
+// This allows using flight.NewRecordReader which expects to read from the stream directly.
+type doPutDataStream struct {
 	firstMsg  *flight.FlightData
 	stream    flight.FlightService_DoPutServer
-	firstRead bool
+	firstSent bool
 }
 
-func newFlightDataReader(firstMsg *flight.FlightData, stream flight.FlightService_DoPutServer) *flightDataReader {
-	return &flightDataReader{
+func newDoPutDataStream(firstMsg *flight.FlightData, stream flight.FlightService_DoPutServer) *doPutDataStream {
+	return &doPutDataStream{
 		firstMsg:  firstMsg,
 		stream:    stream,
-		firstRead: false,
+		firstSent: false,
 	}
 }
 
-func (r *flightDataReader) Read(p []byte) (n int, err error) {
-	// First read returns the initial message data
-	if !r.firstRead {
-		r.firstRead = true
-		if r.firstMsg != nil && len(r.firstMsg.DataBody) > 0 {
-			n = copy(p, r.firstMsg.DataBody)
-			return n, nil
-		}
+// Recv implements the DataStreamReader interface for flight.NewRecordReader.
+func (s *doPutDataStream) Recv() (*flight.FlightData, error) {
+	if !s.firstSent {
+		s.firstSent = true
+		return s.firstMsg, nil
 	}
-
-	// Subsequent reads come from stream
-	msg, err := r.stream.Recv()
-	if err != nil {
-		return 0, err
-	}
-
-	if len(msg.DataBody) == 0 {
-		return 0, io.EOF
-	}
-
-	n = copy(p, msg.DataBody)
-	return n, nil
+	return s.stream.Recv()
 }
 
-// handleDoPutInsert processes INSERT operations via DoPut.
-// The descriptor map should contain schema_name and table_name.
-//nolint:unparam
-func (s *Server) handleDoPutInsert(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
-	// Parse descriptor
-	descriptorBytes, err := json.Marshal(descriptorMap)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
-	}
-
-	var descriptor InsertDescriptor
-	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid INSERT descriptor: %v", err)
-	}
-
-	s.logger.Debug("Processing INSERT operation",
-		"schema", descriptor.SchemaName,
-		"table", descriptor.TableName,
-	)
-
-	// Call the DML handler - it sends the result internally
-	if err := s.handleInsert(&descriptor, stream); err != nil {
-		return nil, err
-	}
-
-	// Return nil to indicate result was already sent
-	return nil, nil
+// newFlightDataReader creates a DataStreamReader that prepends the first message
+// to the stream, allowing use with flight.NewRecordReader.
+func newFlightDataReader(firstMsg *flight.FlightData, stream flight.FlightService_DoPutServer) flight.DataStreamReader {
+	return newDoPutDataStream(firstMsg, stream)
 }
 
-// handleDoPutUpdate processes UPDATE operations via DoPut.
-// The descriptor map should contain schema_name, table_name, and row_ids.
-//nolint:unparam
-func (s *Server) handleDoPutUpdate(descriptorMap map[string]interface{}, stream flight.FlightService_DoPutServer) (*flight.PutResult, error) {
-	// Parse descriptor
-	descriptorBytes, err := json.Marshal(descriptorMap)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid descriptor: %v", err)
-	}
-
-	var descriptor UpdateDescriptor
-	if err := json.Unmarshal(descriptorBytes, &descriptor); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid UPDATE descriptor: %v", err)
-	}
-
-	s.logger.Debug("Processing UPDATE operation",
-		"schema", descriptor.SchemaName,
-		"table", descriptor.TableName,
-		"row_count", len(descriptor.RowIds),
-	)
-
-	// Call the DML handler - it sends the result internally
-	if err := s.handleUpdate(&descriptor, stream); err != nil {
-		return nil, err
-	}
-
-	// Return nil to indicate result was already sent
-	return nil, nil
-}

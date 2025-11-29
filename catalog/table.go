@@ -20,14 +20,20 @@ type Table interface {
 	Comment() string
 
 	// ArrowSchema returns the logical schema describing table columns.
+	// If columns is nil or empty, returns full schema.
+	// If columns is provided, returns projected schema with only those columns.
+	// Column order in the returned schema matches the order in columns slice.
 	// Returns nil if schema is dynamic (see DynamicSchemaTable interface).
 	// If non-nil, MUST return valid *arrow.Schema.
-	ArrowSchema() *arrow.Schema
+	ArrowSchema(columns []string) *arrow.Schema
 
 	// Scan executes a scan operation and returns a RecordReader.
 	// Context allows cancellation; implementation MUST respect ctx.Done().
 	// Caller MUST call reader.Release() to free memory.
-	// Returned RecordReader schema MUST match ArrowSchema() (if non-nil).
+	// If opts.Columns is specified, implementation MAY return either:
+	//   - Full schema records (server will apply projection)
+	//   - Projected schema records (optimization)
+	// Either way, returned data will match what client expects.
 	Scan(ctx context.Context, opts *ScanOptions) (array.RecordReader, error)
 }
 
@@ -44,4 +50,44 @@ type DynamicSchemaTable interface {
 	// Used by GetFlightInfo to provide schema without executing full scan.
 	// Returns error if parameters are invalid or schema cannot be determined.
 	SchemaForRequest(ctx context.Context, req *SchemaRequest) (*arrow.Schema, error)
+}
+
+// InsertableTable extends Table with INSERT capability.
+// Tables implement this interface to accept new rows via DoPut.
+// Implementations MUST be goroutine-safe.
+type InsertableTable interface {
+	Table
+
+	// Insert adds new rows to the table.
+	// The rows RecordReader provides batches of data to insert.
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	// Caller MUST call rows.Release() after Insert returns.
+	Insert(ctx context.Context, rows array.RecordReader) (*DMLResult, error)
+}
+
+// UpdatableTable extends Table with UPDATE capability.
+// Tables must have a rowid mechanism to identify rows for update.
+// Implementations MUST be goroutine-safe.
+type UpdatableTable interface {
+	Table
+
+	// Update modifies existing rows identified by rowIDs.
+	// The rows RecordReader provides replacement data for matched rows.
+	// Row order in RecordReader must correspond to rowIDs order.
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*DMLResult, error)
+}
+
+// DeletableTable extends Table with DELETE capability.
+// Tables must have a rowid mechanism to identify rows for deletion.
+// Implementations MUST be goroutine-safe.
+type DeletableTable interface {
+	Table
+
+	// Delete removes rows identified by rowIDs.
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	Delete(ctx context.Context, rowIDs []int64) (*DMLResult, error)
 }

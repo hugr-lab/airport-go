@@ -19,12 +19,13 @@ import (
 	"github.com/hugr-lab/airport-go/catalog"
 )
 
-// DoExchange implements bidirectional streaming for function execution.
-// This is used by DuckDB Airport extension to execute scalar and table functions.
+// DoExchange implements bidirectional streaming for function execution and DML operations.
+// This is used by DuckDB Airport extension to execute scalar and table functions,
+// as well as INSERT, UPDATE, and DELETE operations.
 //
 // Protocol:
 // - Client sends batches of input data via stream
-// - Server executes function on input data
+// - Server executes function/DML on input data
 // - Server sends back result batches via stream
 //
 // For scalar functions, the implementation uses a pipeline with 3 stages running concurrently:
@@ -35,13 +36,22 @@ import (
 // For table functions (in/out), the function processes the entire input stream
 // and returns an output RecordReader.
 //
+// For DML operations (insert, update, delete):
+// - INSERT: Client sends data rows, server returns RETURNING data if requested
+// - UPDATE: Client sends rowid + new column values, server returns RETURNING data if requested
+// - DELETE: Client sends rowid values only, server returns RETURNING data if requested
+//
 // Headers:
-// - airport-operation: "scalar_function" or "table_function"
-// - return-chunks: "1"
+// - airport-operation: "scalar_function", "table_function", "insert", "update", "delete"
+// - airport-flight-path: "schema/table" or "schema/function"
+// - return-chunks: "1" if RETURNING clause present, "0" otherwise
 //
 // References:
 // - Scalar functions: https://airport.query.farm/scalar_functions.html
 // - Table functions: https://airport.query.farm/table_returning_functions.html
+// - INSERT: https://airport.query.farm/table_insert.html
+// - UPDATE: https://airport.query.farm/table_update.html
+// - DELETE: https://airport.query.farm/table_delete.html
 func (s *Server) DoExchange(stream flight.FlightService_DoExchangeServer) error {
 	ctx := stream.Context()
 
@@ -57,49 +67,56 @@ func (s *Server) DoExchange(stream flight.FlightService_DoExchangeServer) error 
 		return status.Errorf(codes.InvalidArgument, "missing airport-operation header")
 	}
 
-	// Support scalar_function, table_function, and table_function_in_out operations
 	opType := operation[0]
-	if opType != "scalar_function" && opType != "table_function" && opType != "table_function_in_out" {
-		return status.Errorf(codes.InvalidArgument, "invalid airport-operation: %s (expected scalar_function, table_function, or table_function_in_out)", opType)
-	}
 
+	// Get return-chunks header (required for functions, optional for DML)
 	returnChunks := md.Get("return-chunks")
-	if len(returnChunks) == 0 || returnChunks[0] != "1" {
-		return status.Errorf(codes.InvalidArgument, "missing or invalid return-chunks header")
-	}
+	returnData := len(returnChunks) > 0 && returnChunks[0] == "1"
 
-	// Get the function descriptor from gRPC metadata
+	// Get the flight path from gRPC metadata
 	flightPath := md.Get("airport-flight-path")
 	if len(flightPath) == 0 {
 		return status.Errorf(codes.InvalidArgument, "missing airport-flight-path in metadata")
 	}
 
-	// Parse the flight path (format: "schema/function")
+	// Parse the flight path (format: "schema/table" or "schema/function")
 	pathParts := strings.Split(flightPath[0], "/")
 	if len(pathParts) != 2 {
 		return status.Errorf(codes.InvalidArgument, "invalid flight path format: %s", flightPath[0])
 	}
 
 	schemaName := pathParts[0]
-	functionName := pathParts[1]
+	targetName := pathParts[1] // table name or function name
 
-	s.logger.Debug("DoExchange function execution requested",
+	s.logger.Debug("DoExchange requested",
 		"operation", opType,
-		"return_chunks", returnChunks[0],
+		"return_chunks", returnData,
 		"schema", schemaName,
-		"function", functionName,
+		"target", targetName,
 	)
 
 	// Route to appropriate handler based on operation type
 	switch opType {
 	case "scalar_function":
-		return s.handleScalarFunction(ctx, stream, schemaName, functionName)
+		if !returnData {
+			return status.Errorf(codes.InvalidArgument, "missing or invalid return-chunks header for scalar_function")
+		}
+		return s.handleScalarFunction(ctx, stream, schemaName, targetName)
 	case "table_function", "table_function_in_out":
+		if !returnData {
+			return status.Errorf(codes.InvalidArgument, "missing or invalid return-chunks header for table_function")
+		}
 		// Both table functions and in/out table functions use the same handler
 		// The handler detects the function type and handles accordingly
-		return s.handleTableFunction(ctx, stream, schemaName, functionName)
+		return s.handleTableFunction(ctx, stream, schemaName, targetName)
+	case "insert":
+		return s.handleDoExchangeInsert(ctx, stream, schemaName, targetName, returnData)
+	case "update":
+		return s.handleDoExchangeUpdate(ctx, stream, schemaName, targetName, returnData)
+	case "delete":
+		return s.handleDoExchangeDelete(ctx, stream, schemaName, targetName, returnData)
 	default:
-		return status.Errorf(codes.InvalidArgument, "unsupported operation: %s", opType)
+		return status.Errorf(codes.InvalidArgument, "invalid airport-operation: %s (expected scalar_function, table_function, table_function_in_out, insert, update, or delete)", opType)
 	}
 }
 

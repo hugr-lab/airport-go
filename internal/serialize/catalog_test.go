@@ -83,8 +83,8 @@ func (m *mockTable) Comment() string {
 	return "Test table"
 }
 
-func (m *mockTable) ArrowSchema() *arrow.Schema {
-	return m.schema
+func (m *mockTable) ArrowSchema(columns []string) *arrow.Schema {
+	return catalog.ProjectSchema(m.schema, columns)
 }
 
 func (m *mockTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {

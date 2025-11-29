@@ -67,8 +67,8 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 		return nil, status.Errorf(codes.NotFound, "table not found: %s.%s", schemaName, tableName)
 	}
 
-	// Get Arrow schema from table
-	arrowSchema := table.ArrowSchema()
+	// Get Arrow schema from table (no projection)
+	arrowSchema := table.ArrowSchema(nil)
 	if arrowSchema == nil {
 		s.logger.Error("Table returned nil Arrow schema",
 			"schema", schemaName,

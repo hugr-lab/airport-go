@@ -44,6 +44,11 @@ type ServerConfig struct {
 	// OPTIONAL: If empty, FlightEndpoint locations will not include URI.
 	// Required for proper DoGet routing when DuckDB needs to reconnect.
 	Address string
+
+	// TransactionManager coordinates multi-operation transactions.
+	// OPTIONAL: If nil, operations execute without transaction coordination.
+	// When configured, DML operations support automatic commit/rollback.
+	TransactionManager catalog.TransactionManager
 }
 
 // Standard errors returned by airport package.

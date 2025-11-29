@@ -135,8 +135,10 @@ func (t *StaticTable) Comment() string {
 }
 
 // ArrowSchema implements Table interface.
-func (t *StaticTable) ArrowSchema() *arrow.Schema {
-	return t.schema
+// If columns is nil or empty, returns full schema.
+// If columns is provided, returns projected schema with only those columns.
+func (t *StaticTable) ArrowSchema(columns []string) *arrow.Schema {
+	return ProjectSchema(t.schema, columns)
 }
 
 // Scan implements Table interface.
