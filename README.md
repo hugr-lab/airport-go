@@ -241,6 +241,38 @@ CREATE TABLE demo.main.backup AS SELECT * FROM demo.main.users;
 
 See [examples/ddl](examples/ddl/) for a complete implementation.
 
+## Filter Pushdown (Predicate Pushdown)
+
+DuckDB can push filter predicates to the server for optimized query execution. The `ScanOptions.Filter` field contains a serialized JSON expression representing the WHERE clause.
+
+```go
+func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    if opts.Filter != nil {
+        // Filter contains JSON-serialized predicate expression
+        // See: https://airport.query.farm/server_predicate_pushdown.html
+
+        // Parse and apply filter to your data source
+        // This allows pushing filters to databases, APIs, etc.
+    }
+    // Return filtered data...
+}
+```
+
+The JSON filter format includes:
+- `filters`: Array of expression trees
+- `column_binding_names_by_index`: Maps column indices to names
+
+Expression types:
+- `BOUND_COMPARISON`: Comparison operators (=, >, <, etc.)
+- `BOUND_COLUMN_REF`: Column references
+- `BOUND_CONSTANT`: Literal values with type info
+- `BOUND_CONJUNCTION`: Logical AND/OR operators
+- `BOUND_FUNCTION`: Function calls
+
+**Note**: Currently, implementations must parse the raw JSON manually. Future versions will provide helper types and functions for filter interpretation.
+
+For detailed format specification, see the [Airport Extension documentation](https://airport.query.farm/server_predicate_pushdown.html).
+
 ## Architecture
 
 The package follows an interface-based design:

@@ -229,6 +229,61 @@ type ScanOptions struct {
 
 Note: Table implementations receive column hints but must return full schema data. The server validates that returned data matches the table's declared schema.
 
+## Filter Pushdown (Predicate Pushdown)
+
+DuckDB can push WHERE clause predicates to the server via `ScanOptions.Filter`. The filter is a JSON-serialized expression tree.
+
+### JSON Format
+
+```json
+{
+  "filters": [
+    {
+      "expression_class": "BOUND_COMPARISON",
+      "type": "COMPARE_EQUAL",
+      "return_type": {"id": "BOOLEAN", "type_info": null},
+      "children": [
+        {
+          "expression_class": "BOUND_COLUMN_REF",
+          "binding": {"table_index": 0, "column_index": 1},
+          "return_type": {"id": "VARCHAR", "type_info": null}
+        },
+        {
+          "expression_class": "BOUND_CONSTANT",
+          "value": {"is_null": false, "value": "active"},
+          "return_type": {"id": "VARCHAR", "type_info": null}
+        }
+      ]
+    }
+  ],
+  "column_binding_names_by_index": ["id", "status", "created_at"]
+}
+```
+
+### Expression Classes
+
+| Class | Description |
+|-------|-------------|
+| `BOUND_COMPARISON` | Comparison operators: COMPARE_EQUAL, COMPARE_GREATERTHAN, COMPARE_LESSTHAN, COMPARE_GREATERTHANOREQUALTO, COMPARE_LESSTHANOREQUALTO, COMPARE_NOTEQUAL |
+| `BOUND_COLUMN_REF` | Column reference with table_index and column_index binding |
+| `BOUND_CONSTANT` | Literal value with type information |
+| `BOUND_CONJUNCTION` | Logical operators: CONJUNCTION_AND, CONJUNCTION_OR |
+| `BOUND_OPERATOR` | Special operators like COMPARE_IN |
+| `BOUND_FUNCTION` | Function calls with arguments and return types |
+
+### Type IDs
+
+Common `return_type.id` values:
+- `BOOLEAN`, `TINYINT`, `SMALLINT`, `INTEGER`, `BIGINT`
+- `FLOAT`, `DOUBLE`, `DECIMAL`
+- `VARCHAR`, `BLOB`
+- `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMP_TZ`
+- `LIST`, `STRUCT`, `MAP`
+
+For the complete format specification, see the [DuckDB Airport Extension documentation](https://airport.query.farm/server_predicate_pushdown.html).
+
+**Note**: Currently, server implementations must parse the raw JSON. Future versions of airport-go will provide helper types and functions for filter interpretation.
+
 ## Time Travel
 
 Airport supports point-in-time queries via the `endpoints` action:

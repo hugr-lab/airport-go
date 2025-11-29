@@ -99,8 +99,9 @@ type ScanOptions struct {
     // NOTE: Scan must still return full schema data.
     Columns []string
 
-    // Filter is a serialized Arrow expression for row filtering.
+    // Filter contains a serialized JSON predicate expression from DuckDB.
     // nil means no filtering (return all rows).
+    // See "Filter Pushdown" section below for format details.
     Filter []byte
 
     // Limit is maximum rows to return.
@@ -121,6 +122,59 @@ type TimePoint struct {
     Value string // Time value in appropriate format
 }
 ```
+
+### Filter Pushdown
+
+The `ScanOptions.Filter` field contains a JSON-serialized predicate expression that represents WHERE clause filters pushed down from DuckDB. Implementing filter pushdown can significantly improve query performance by reducing data transfer.
+
+**JSON Structure:**
+
+```json
+{
+  "filters": [...],
+  "column_binding_names_by_index": ["column1", "column2", ...]
+}
+```
+
+**Expression Types:**
+
+| Expression Class | Description | Key Fields |
+|-----------------|-------------|------------|
+| `BOUND_COMPARISON` | Comparison operators (=, >, <, >=, <=, !=) | `type`: COMPARE_EQUAL, COMPARE_GREATERTHAN, etc. |
+| `BOUND_COLUMN_REF` | Column references | `binding.table_index`, `binding.column_index` |
+| `BOUND_CONSTANT` | Literal values | `value`, `return_type.id` |
+| `BOUND_CONJUNCTION` | Logical operators | `type`: CONJUNCTION_AND, CONJUNCTION_OR |
+| `BOUND_FUNCTION` | Function calls | `function.name`, `children` |
+
+**Example Implementation:**
+
+```go
+func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    if opts.Filter != nil {
+        // Parse the JSON filter
+        var filterExpr struct {
+            Filters              []json.RawMessage `json:"filters"`
+            ColumnBindingNames   []string          `json:"column_binding_names_by_index"`
+        }
+        if err := json.Unmarshal(opts.Filter, &filterExpr); err != nil {
+            // Fall back to unfiltered scan
+            return t.scanAll(ctx)
+        }
+
+        // Interpret filter expressions and push to your data source
+        // e.g., convert to SQL WHERE clause, API query parameters, etc.
+    }
+
+    return t.scanAll(ctx)
+}
+```
+
+**Note:** Currently, implementations must parse the raw JSON manually. Future versions of airport-go will provide helper types and functions for filter interpretation, including:
+- Type-safe expression tree structures
+- Operator and value extraction utilities
+- SQL/query builder helpers
+
+For the complete JSON format specification, see the [Airport Extension documentation](https://airport.query.farm/server_predicate_pushdown.html).
 
 ## DML Interfaces
 

@@ -12,8 +12,29 @@ type ScanOptions struct {
 	// Columns to return. If nil/empty, return all columns.
 	Columns []string
 
-	// Filter predicate (serialized Arrow expression).
+	// Filter contains a serialized JSON predicate expression from DuckDB.
 	// If nil, no filtering (return all rows).
+	//
+	// The JSON format is documented at https://airport.query.farm/server_predicate_pushdown.html
+	// It contains expression trees with comparison operators, column references,
+	// constants, and logical conjunctions (AND/OR).
+	//
+	// Currently, implementations must parse the raw JSON bytes manually.
+	// Future versions will provide helper types and functions to interpret
+	// the filter structure (expression trees, operators, value extraction).
+	//
+	// Example JSON structure:
+	//   {
+	//     "filters": [...],
+	//     "column_binding_names_by_index": ["col1", "col2", ...]
+	//   }
+	//
+	// Expression types include:
+	//   - BOUND_COMPARISON: Comparison ops (COMPARE_EQUAL, COMPARE_GREATERTHAN, etc.)
+	//   - BOUND_COLUMN_REF: Column references with binding info
+	//   - BOUND_CONSTANT: Literal values with type information
+	//   - BOUND_CONJUNCTION: Logical operators (CONJUNCTION_AND, CONJUNCTION_OR)
+	//   - BOUND_FUNCTION: Function calls with arguments
 	Filter []byte
 
 	// Limit is maximum rows to return.

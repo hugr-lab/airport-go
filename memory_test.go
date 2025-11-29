@@ -2,6 +2,7 @@ package airport
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -14,12 +15,11 @@ import (
 // TestMemoryLeaks uses memory.NewCheckedAllocator to detect memory leaks.
 // This test ensures that all Arrow objects are properly released.
 func TestMemoryLeaks(t *testing.T) {
-	// Create checked allocator that tracks allocations
-	allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
-	defer allocator.AssertSize(t, 0) // Verify no leaks at end
-
-	// Test 1: Building a catalog should not leak
+	// Test 1: Building a catalog should not leak (scan function not called)
 	t.Run("CatalogBuilder", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer allocator.AssertSize(t, 0)
+
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 		}, nil)
@@ -45,7 +45,7 @@ func TestMemoryLeaks(t *testing.T) {
 			t.Fatalf("Build failed: %v", err)
 		}
 
-		// Use the catalog
+		// Use the catalog (but don't scan)
 		ctx := context.Background()
 		schemas, err := cat.Schemas(ctx)
 		if err != nil {
@@ -55,12 +55,13 @@ func TestMemoryLeaks(t *testing.T) {
 		if len(schemas) != 1 {
 			t.Errorf("Expected 1 schema, got %d", len(schemas))
 		}
-
-		// All Arrow objects should be released by now
 	})
 
 	// Test 2: Scanning a table should not leak
 	t.Run("TableScan", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer allocator.AssertSize(t, 0)
+
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 			{Name: "name", Type: arrow.BinaryTypes.String},
@@ -114,7 +115,6 @@ func TestMemoryLeaks(t *testing.T) {
 		// Read all records
 		for reader.Next() {
 			record := reader.RecordBatch()
-			// Don't need to release - reader owns it
 			if record.NumRows() != 3 {
 				t.Errorf("Expected 3 rows, got %d", record.NumRows())
 			}
@@ -127,6 +127,9 @@ func TestMemoryLeaks(t *testing.T) {
 
 	// Test 3: Multiple scans should not accumulate leaks
 	t.Run("MultipleScans", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer allocator.AssertSize(t, 0)
+
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "value", Type: arrow.PrimitiveTypes.Int64},
 		}, nil)
@@ -170,12 +173,13 @@ func TestMemoryLeaks(t *testing.T) {
 
 			reader.Release()
 		}
-
-		// Memory should be back to baseline
 	})
 
 	// Test 4: Building and releasing records
 	t.Run("RecordBuilding", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer allocator.AssertSize(t, 0)
+
 		schema := arrow.NewSchema([]arrow.Field{
 			{Name: "x", Type: arrow.PrimitiveTypes.Float64},
 			{Name: "y", Type: arrow.PrimitiveTypes.Float64},
@@ -203,6 +207,9 @@ func TestMemoryLeaks(t *testing.T) {
 
 	// Test 5: Array building
 	t.Run("ArrayBuilding", func(t *testing.T) {
+		allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
+		defer allocator.AssertSize(t, 0)
+
 		// Build various array types
 		intBuilder := array.NewInt64Builder(allocator)
 		intBuilder.AppendValues([]int64{1, 2, 3, 4, 5}, nil)
@@ -259,14 +266,15 @@ func TestMemoryLeaksInConcurrentScans(t *testing.T) {
 	testSchema, _ := cat.Schema(ctx, "test")
 	table, _ := testSchema.Table(ctx, "data")
 
-	// Concurrent scans
-	done := make(chan bool, 5)
+	// Concurrent scans - use sync.WaitGroup for proper synchronization
+	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			reader, err := table.Scan(ctx, &catalog.ScanOptions{})
 			if err != nil {
 				t.Errorf("Scan failed: %v", err)
-				done <- false
 				return
 			}
 			defer reader.Release()
@@ -274,15 +282,11 @@ func TestMemoryLeaksInConcurrentScans(t *testing.T) {
 			for reader.Next() {
 				_ = reader.RecordBatch()
 			}
-
-			done <- true
 		}()
 	}
 
-	// Wait for all to complete
-	for i := 0; i < 5; i++ {
-		<-done
-	}
+	// Wait for all goroutines to complete
+	wg.Wait()
 }
 
 // TestNoMemoryLeaksWithErrors tests that memory is released even when errors occur.
