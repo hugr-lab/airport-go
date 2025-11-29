@@ -143,12 +143,30 @@ airport.NewServer(grpcServer, airport.ServerConfig{
 })
 ```
 
-Test with DuckDB:
+Test with DuckDB using a persistent secret:
 
 ```sql
-ATTACH 'grpc://localhost:50051' AS my_server (
+-- Create a persistent secret for authentication
+CREATE PERSISTENT SECRET my_auth (
+    TYPE airport,
+    auth_token 'secret-api-key',
+    scope 'grpc://localhost:50051'
+);
+
+-- Attach using the secret (automatically applies to matching scope)
+ATTACH 'my_server' AS my_server (
     TYPE AIRPORT,
-    bearer_token 'secret-api-key'
+    location 'grpc://localhost:50051'
+);
+```
+
+Alternatively, for inline authentication headers:
+
+```sql
+SELECT * FROM airport_take_flight(
+    'grpc://localhost:50051',
+    'SELECT * FROM my_schema.users',
+    headers := MAP{'authorization': 'secret-api-key'}
 );
 ```
 

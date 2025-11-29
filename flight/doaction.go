@@ -74,6 +74,10 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 	case "catalog_version":
 		return s.handleCatalogVersionAction(ctx, action, stream)
 
+	// Statistics action
+	case "column_statistics":
+		return s.handleColumnStatisticsAction(ctx, action, stream)
+
 	// Required Airport actions
 	case "list_schemas":
 		return s.handleListSchemas(ctx, action, stream)
@@ -259,6 +263,13 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		arrowSchema := table.ArrowSchema(nil)
 		if arrowSchema == nil {
 			continue
+		}
+
+		// Check if table implements StatisticsTable interface
+		// If so, add "can_produce_statistics" to Arrow schema metadata
+		// This tells DuckDB that this table can provide column statistics
+		if _, ok := table.(catalog.StatisticsTable); ok {
+			arrowSchema = addSchemaMetadata(arrowSchema, "can_produce_statistics", "true")
 		}
 
 		// Create Flight app_metadata matching AirportSerializedFlightAppMetadata
@@ -611,4 +622,29 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 
 	// Return the serialized compressed content
 	return string(serialized), hashHex, nil
+}
+
+// addSchemaMetadata adds a key-value pair to an Arrow schema's metadata.
+// Returns a new schema with the added metadata.
+func addSchemaMetadata(schema *arrow.Schema, key, value string) *arrow.Schema {
+	// Build metadata map with existing metadata
+	metaMap := make(map[string]string)
+	existingMeta := schema.Metadata()
+	for i := 0; i < existingMeta.Len(); i++ {
+		metaMap[existingMeta.Keys()[i]] = existingMeta.Values()[i]
+	}
+	// Add new key-value
+	metaMap[key] = value
+
+	// Build keys and values slices
+	keys := make([]string, 0, len(metaMap))
+	values := make([]string, 0, len(metaMap))
+	for k, v := range metaMap {
+		keys = append(keys, k)
+		values = append(values, v)
+	}
+
+	// Create new schema with updated metadata
+	newMeta := arrow.NewMetadata(keys, values)
+	return arrow.NewSchema(schema.Fields(), &newMeta)
 }
