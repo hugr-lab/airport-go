@@ -7,7 +7,7 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Method 1: Direct attach with TLS (no authentication)
-ATTACH 'grpc+tls://localhost:50051' AS secure_data (TYPE airport);
+ATTACH '' AS secure_data (TYPE airport, LOCATION 'grpc+tls://localhost:50051');
 
 -- Query the secure data
 SELECT * FROM secure_data.secure.messages;

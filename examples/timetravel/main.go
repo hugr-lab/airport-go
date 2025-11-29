@@ -6,7 +6,7 @@
 //	duckdb
 //	INSTALL airport FROM community;
 //	LOAD airport;
-//	ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+//	ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 //
 //	-- Query current data:
 //	SELECT * FROM demo.main.users;
@@ -80,7 +80,7 @@ func main() {
 	log.Println("  VERSION 3: Alice + Bob + Charlie (current)")
 	log.Println("")
 	log.Println("Test with DuckDB CLI:")
-	log.Println("  ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);")
+	log.Println("  ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');")
 	log.Println("  SELECT * FROM demo.main.users;                    -- Current (v3)")
 	log.Println("  SELECT * FROM demo.main.users AT (VERSION => 1);  -- v1: Alice")
 	log.Println("  SELECT * FROM demo.main.users AT (VERSION => 2);  -- v2: Alice+Bob")

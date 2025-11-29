@@ -50,7 +50,7 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Connect to the time travel server
-ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 ```
 
 ### Query Current Data

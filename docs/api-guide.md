@@ -1,0 +1,722 @@
+# API Guide
+
+This document provides a comprehensive reference for the airport-go public API.
+
+## Package Structure
+
+```text
+github.com/hugr-lab/airport-go
+├── airport.go          # Main package: Server, CatalogBuilder
+├── catalog/            # Catalog interfaces
+├── auth/               # Authentication implementations
+└── flight/             # Flight handler (internal)
+```
+
+## Core Interfaces
+
+### catalog.Catalog
+
+The root interface for exposing data. Every Airport server requires a Catalog implementation.
+
+```go
+type Catalog interface {
+    // Schemas returns all schemas in this catalog.
+    // Context may contain auth info for permission-based filtering.
+    // Returns empty slice (not nil) if no schemas available.
+    Schemas(ctx context.Context) ([]Schema, error)
+
+    // Schema returns a specific schema by name.
+    // Returns (nil, nil) if schema doesn't exist (not an error).
+    // Returns (nil, err) if lookup fails for other reasons.
+    Schema(ctx context.Context, name string) (Schema, error)
+}
+```
+
+### catalog.Schema
+
+Represents a namespace containing tables and functions.
+
+```go
+type Schema interface {
+    // Name returns the schema name (e.g., "main", "information_schema").
+    Name() string
+
+    // Comment returns optional schema documentation.
+    Comment() string
+
+    // Tables returns all tables in this schema.
+    // Returns empty slice (not nil) if no tables available.
+    Tables(ctx context.Context) ([]Table, error)
+
+    // Table returns a specific table by name.
+    // Returns (nil, nil) if table doesn't exist (not an error).
+    Table(ctx context.Context, name string) (Table, error)
+
+    // ScalarFunctions returns all scalar functions in this schema.
+    ScalarFunctions(ctx context.Context) ([]ScalarFunction, error)
+
+    // TableFunctions returns all table-valued functions in this schema.
+    TableFunctions(ctx context.Context) ([]TableFunction, error)
+
+    // TableFunctionsInOut returns all table functions that accept row sets as input.
+    TableFunctionsInOut(ctx context.Context) ([]TableFunctionInOut, error)
+}
+```
+
+### catalog.Table
+
+Represents a scannable table.
+
+```go
+type Table interface {
+    // Name returns the table name.
+    Name() string
+
+    // Comment returns an optional description.
+    Comment() string
+
+    // ArrowSchema returns the table's Arrow schema.
+    // If columns is non-nil, returns a projected schema with only those columns.
+    // Column order in the returned schema matches the order in columns slice.
+    ArrowSchema(columns []string) *arrow.Schema
+
+    // Scan returns a RecordReader for reading table data.
+    // IMPORTANT: Must return data matching the full schema, not projected.
+    // DuckDB handles column projection client-side.
+    // Caller MUST call reader.Release() to free memory.
+    Scan(ctx context.Context, opts *ScanOptions) (array.RecordReader, error)
+}
+```
+
+### catalog.ScanOptions
+
+Options passed to Table.Scan:
+
+```go
+type ScanOptions struct {
+    // Columns is the list of columns requested by the client.
+    // If nil or empty, client wants all columns.
+    // NOTE: Scan must still return full schema data.
+    Columns []string
+
+    // Filter is a serialized Arrow expression for row filtering.
+    // nil means no filtering (return all rows).
+    Filter []byte
+
+    // Limit is maximum rows to return.
+    // 0 or negative means no limit.
+    Limit int64
+
+    // BatchSize is a hint for RecordReader batch size.
+    // 0 means implementation chooses default.
+    BatchSize int
+
+    // TimePoint specifies point-in-time for time-travel queries.
+    // nil for "current" time (no time travel).
+    TimePoint *TimePoint
+}
+
+type TimePoint struct {
+    Unit  string // "timestamp", "version", or "snapshot"
+    Value string // Time value in appropriate format
+}
+```
+
+## DML Interfaces
+
+### catalog.InsertableTable
+
+Extends Table with data insertion capability.
+
+```go
+type InsertableTable interface {
+    Table
+
+    // Insert adds new rows to the table.
+    // The rows RecordReader provides batches of data to insert.
+    // Returns DMLResult with affected row count and optional returning data.
+    // Caller MUST call rows.Release() after Insert returns.
+    Insert(ctx context.Context, rows array.RecordReader) (*DMLResult, error)
+}
+```
+
+### catalog.UpdatableTable
+
+Extends Table with data update capability.
+
+```go
+type UpdatableTable interface {
+    Table
+
+    // Update modifies existing rows identified by rowIDs.
+    // The rows RecordReader provides replacement data for matched rows.
+    // Row order in RecordReader must correspond to rowIDs order.
+    // Returns DMLResult with affected row count.
+    Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*DMLResult, error)
+}
+```
+
+### catalog.DeletableTable
+
+Extends Table with data deletion capability.
+
+```go
+type DeletableTable interface {
+    Table
+
+    // Delete removes rows identified by rowIDs.
+    // Returns DMLResult with affected row count.
+    Delete(ctx context.Context, rowIDs []int64) (*DMLResult, error)
+}
+```
+
+### catalog.DMLResult
+
+Result of DML operations:
+
+```go
+type DMLResult struct {
+    // AffectedRows is the count of rows inserted, updated, or deleted.
+    AffectedRows int64
+
+    // ReturningData contains rows affected by the operation when
+    // a RETURNING clause was specified. nil if no RETURNING requested.
+    ReturningData array.RecordReader
+}
+```
+
+## DDL Interfaces
+
+### catalog.DynamicCatalog
+
+Extends Catalog with schema management:
+
+```go
+type DynamicCatalog interface {
+    Catalog
+
+    // CreateSchema creates a new schema in the catalog.
+    // Returns ErrAlreadyExists if schema exists.
+    CreateSchema(ctx context.Context, name string, opts CreateSchemaOptions) (Schema, error)
+
+    // DropSchema removes a schema from the catalog.
+    // Returns ErrNotFound if schema doesn't exist and IgnoreNotFound is false.
+    // Returns ErrSchemaNotEmpty if schema contains tables.
+    DropSchema(ctx context.Context, name string, opts DropSchemaOptions) error
+}
+
+type CreateSchemaOptions struct {
+    Comment string            // Optional documentation
+    Tags    map[string]string // Optional metadata
+}
+
+type DropSchemaOptions struct {
+    IgnoreNotFound bool // Don't error if schema doesn't exist
+}
+```
+
+### catalog.DynamicSchema
+
+Extends Schema with table management:
+
+```go
+type DynamicSchema interface {
+    Schema
+
+    // CreateTable creates a new table in the schema.
+    // Returns ErrAlreadyExists if table exists and OnConflict is OnConflictError.
+    CreateTable(ctx context.Context, name string, schema *arrow.Schema, opts CreateTableOptions) (Table, error)
+
+    // DropTable removes a table from the schema.
+    // Returns ErrNotFound if table doesn't exist and IgnoreNotFound is false.
+    DropTable(ctx context.Context, name string, opts DropTableOptions) error
+
+    // RenameTable renames a table in the schema.
+    // Returns ErrNotFound if table doesn't exist and IgnoreNotFound is false.
+    // Returns ErrAlreadyExists if newName already exists.
+    RenameTable(ctx context.Context, oldName, newName string, opts RenameTableOptions) error
+}
+
+type OnConflict string
+
+const (
+    OnConflictError   OnConflict = "error"   // Return error if exists
+    OnConflictIgnore  OnConflict = "ignore"  // Silently succeed if exists
+    OnConflictReplace OnConflict = "replace" // Drop and recreate
+)
+
+type CreateTableOptions struct {
+    OnConflict         OnConflict // Behavior when table exists
+    Comment            string     // Optional documentation
+    NotNullConstraints []uint64   // Column indices with NOT NULL
+    UniqueConstraints  []uint64   // Column indices that must be unique
+    CheckConstraints   []string   // SQL check expressions
+}
+
+type DropTableOptions struct {
+    IgnoreNotFound bool // Don't error if table doesn't exist
+}
+
+type RenameTableOptions struct {
+    IgnoreNotFound bool // Don't error if table doesn't exist
+}
+```
+
+### catalog.DynamicTable
+
+Extends Table with column management:
+
+```go
+type DynamicTable interface {
+    Table
+
+    // AddColumn adds a new column to the table.
+    // The columnSchema should contain a single field defining the column.
+    AddColumn(ctx context.Context, columnSchema *arrow.Schema, opts AddColumnOptions) error
+
+    // RemoveColumn removes a column from the table.
+    RemoveColumn(ctx context.Context, name string, opts RemoveColumnOptions) error
+
+    // RenameColumn renames a column in the table.
+    RenameColumn(ctx context.Context, oldName, newName string, opts RenameColumnOptions) error
+
+    // ChangeColumnType changes the type of a column.
+    // The columnSchema should contain a single field with the new type.
+    // The expression is a SQL expression for type conversion.
+    ChangeColumnType(ctx context.Context, columnSchema *arrow.Schema, expression string, opts ChangeColumnTypeOptions) error
+
+    // SetNotNull adds a NOT NULL constraint to a column.
+    SetNotNull(ctx context.Context, columnName string, opts SetNotNullOptions) error
+
+    // DropNotNull removes a NOT NULL constraint from a column.
+    DropNotNull(ctx context.Context, columnName string, opts DropNotNullOptions) error
+
+    // SetDefault sets or changes the default value of a column.
+    SetDefault(ctx context.Context, columnName, expression string, opts SetDefaultOptions) error
+
+    // AddField adds a field to a struct-typed column.
+    AddField(ctx context.Context, columnSchema *arrow.Schema, opts AddFieldOptions) error
+
+    // RenameField renames a field in a struct-typed column.
+    RenameField(ctx context.Context, columnPath []string, newName string, opts RenameFieldOptions) error
+}
+
+type AddColumnOptions struct {
+    IfColumnNotExists bool // Don't error if column exists
+    IgnoreNotFound    bool // Don't error if table doesn't exist
+}
+
+type RemoveColumnOptions struct {
+    IfColumnExists bool // Don't error if column doesn't exist
+    IgnoreNotFound bool // Don't error if table doesn't exist
+    Cascade        bool // Remove dependent objects
+}
+
+type RenameColumnOptions struct {
+    IgnoreNotFound bool // Don't error if table/column doesn't exist
+}
+
+type ChangeColumnTypeOptions struct {
+    IgnoreNotFound bool
+}
+
+type SetNotNullOptions struct {
+    IgnoreNotFound bool
+}
+
+type DropNotNullOptions struct {
+    IgnoreNotFound bool
+}
+
+type SetDefaultOptions struct {
+    IgnoreNotFound bool
+}
+
+type AddFieldOptions struct {
+    IgnoreNotFound   bool
+    IfFieldNotExists bool
+}
+
+type RenameFieldOptions struct {
+    IgnoreNotFound bool
+}
+```
+
+## Statistics Interface
+
+### catalog.StatisticsTable
+
+Enables DuckDB query optimization through column statistics:
+
+```go
+type StatisticsTable interface {
+    Table
+
+    // ColumnStatistics returns statistics for a specific column.
+    // columnName identifies the column to get statistics for.
+    // columnType is the DuckDB type name (e.g., "VARCHAR", "INTEGER").
+    // Returns ColumnStats with nil fields for unavailable statistics.
+    // Returns ErrNotFound if the column doesn't exist.
+    ColumnStatistics(ctx context.Context, columnName string, columnType string) (*ColumnStats, error)
+}
+
+type ColumnStats struct {
+    HasNotNull      *bool   // Column contains non-null values
+    HasNull         *bool   // Column contains null values
+    DistinctCount   *uint64 // Approximate unique value count
+    Min             any     // Minimum value (type matches column)
+    Max             any     // Maximum value (type matches column)
+    MaxStringLength *uint64 // Max string length (string columns only)
+    ContainsUnicode *bool   // Has unicode chars (string columns only)
+}
+```
+
+## Function Interfaces
+
+### catalog.ScalarFunction
+
+Custom scalar functions executed via DoExchange:
+
+```go
+type ScalarFunction interface {
+    // Name returns the function name (e.g., "UPPERCASE").
+    Name() string
+
+    // Comment returns optional documentation.
+    Comment() string
+
+    // Signature returns the function signature.
+    Signature() FunctionSignature
+
+    // Execute runs the function on input record batch and returns result array.
+    // Input record columns match parameter types from Signature.
+    // Returned array matches return type from Signature.
+    // Returned array length equals input record row count.
+    Execute(ctx context.Context, input arrow.RecordBatch) (arrow.Array, error)
+}
+
+type FunctionSignature struct {
+    Parameters []arrow.DataType // Parameter types (in order)
+    ReturnType arrow.DataType   // Return type (nil for table functions)
+    Variadic   bool             // Last param accepts multiple values
+}
+```
+
+### catalog.TableFunction
+
+Functions that return tables:
+
+```go
+type TableFunction interface {
+    // Name returns the function name.
+    Name() string
+
+    // Comment returns optional documentation.
+    Comment() string
+
+    // Signature returns the function signature.
+    Signature() FunctionSignature
+
+    // SchemaForParameters returns the output schema for given parameters.
+    // Parameters are MessagePack-decoded values matching Signature.
+    SchemaForParameters(ctx context.Context, params []any) (*arrow.Schema, error)
+
+    // Execute runs the table function and returns a RecordReader.
+    Execute(ctx context.Context, params []any, opts *ScanOptions) (array.RecordReader, error)
+}
+```
+
+### catalog.TableFunctionInOut
+
+Table functions that accept row sets as input:
+
+```go
+type TableFunctionInOut interface {
+    // Name returns the function name.
+    Name() string
+
+    // Comment returns optional documentation.
+    Comment() string
+
+    // Signature returns the function signature.
+    // First N-1 parameters are scalars.
+    // Last parameter type describes the input row schema.
+    Signature() FunctionSignature
+
+    // SchemaForParameters returns output schema based on params and input schema.
+    SchemaForParameters(ctx context.Context, params []any, inputSchema *arrow.Schema) (*arrow.Schema, error)
+
+    // Execute processes input rows and returns output rows.
+    Execute(ctx context.Context, params []any, input array.RecordReader, opts *ScanOptions) (array.RecordReader, error)
+}
+```
+
+## Versioned Catalog
+
+### catalog.VersionedCatalog
+
+Enables catalog version tracking for cache invalidation:
+
+```go
+type VersionedCatalog interface {
+    Catalog
+
+    // CatalogVersion returns the current version of the catalog.
+    // When version changes, clients refresh their cached schema.
+    CatalogVersion(ctx context.Context) (CatalogVersion, error)
+}
+
+type CatalogVersion struct {
+    Version uint64 // Current version number
+    IsFixed bool   // If true, version is fixed for session
+}
+```
+
+## Transaction Support
+
+### catalog.TransactionManager
+
+Optional interface for transaction coordination:
+
+```go
+type TransactionManager interface {
+    // BeginTransaction creates a new transaction.
+    BeginTransaction(ctx context.Context) (txID string, err error)
+
+    // CommitTransaction marks transaction as complete.
+    CommitTransaction(ctx context.Context, txID string) error
+
+    // RollbackTransaction aborts a transaction.
+    RollbackTransaction(ctx context.Context, txID string) error
+
+    // GetTransactionStatus returns current transaction state.
+    GetTransactionStatus(ctx context.Context, txID string) (TransactionState, bool)
+}
+
+type TransactionState string
+
+const (
+    TransactionActive    TransactionState = "active"
+    TransactionCommitted TransactionState = "committed"
+    TransactionAborted   TransactionState = "aborted"
+)
+```
+
+## CatalogBuilder
+
+The fluent builder for creating static catalogs:
+
+```go
+// Create a new builder
+builder := airport.NewCatalogBuilder()
+
+// Add a schema
+builder.Schema("my_schema")
+
+// Add a simple table with scan function
+builder.SimpleTable(airport.SimpleTableDef{
+    Name:     "my_table",
+    Comment:  "Description",
+    Schema:   arrowSchema,
+    ScanFunc: func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+        // Return data
+    },
+})
+
+// Add a table implementing catalog.Table interface
+builder.Table(myTableImpl)
+
+// Add a scalar function
+builder.ScalarFunc(airport.ScalarFuncDef{
+    Name:         "my_func",
+    Comment:      "Description",
+    InputSchema:  inputSchema,
+    OutputSchema: outputSchema,
+    CallFunc: func(ctx context.Context, args arrow.RecordBatch) (arrow.Array, error) {
+        // Execute function
+    },
+})
+
+// Build the catalog
+catalog, err := builder.Build()
+```
+
+### SimpleTableDef
+
+```go
+type SimpleTableDef struct {
+    Name     string
+    Comment  string
+    Schema   *arrow.Schema
+    ScanFunc func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error)
+}
+```
+
+### ScalarFuncDef
+
+```go
+type ScalarFuncDef struct {
+    Name         string
+    Comment      string
+    InputSchema  *arrow.Schema
+    OutputSchema *arrow.Schema
+    CallFunc     func(ctx context.Context, args arrow.RecordBatch) (arrow.Array, error)
+}
+```
+
+### TableFuncDef
+
+```go
+type TableFuncDef struct {
+    Name         string
+    Comment      string
+    InputSchema  *arrow.Schema
+    OutputSchema *arrow.Schema
+    CallFunc     func(ctx context.Context, args arrow.RecordBatch) (array.RecordReader, error)
+}
+```
+
+## Server Configuration
+
+### ServerConfig
+
+```go
+type ServerConfig struct {
+    // Catalog is the catalog implementation (required)
+    Catalog catalog.Catalog
+
+    // Auth is the authentication handler (optional)
+    Auth Authenticator
+
+    // Address is the server address for FlightEndpoint locations
+    Address string
+
+    // MaxMessageSize sets the maximum gRPC message size (default: 4MB)
+    MaxMessageSize int
+
+    // LogLevel sets the logging verbosity (default: Info)
+    LogLevel *slog.Level
+}
+```
+
+### Creating a Server
+
+```go
+// Create gRPC server with Airport options
+config := airport.ServerConfig{
+    Catalog:        myCatalog,
+    Auth:           myAuth,
+    MaxMessageSize: 16 * 1024 * 1024, // 16MB
+}
+
+opts := airport.ServerOptions(config)
+grpcServer := grpc.NewServer(opts...)
+
+// Register Airport service
+err := airport.NewServer(grpcServer, config)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Start serving
+lis, _ := net.Listen("tcp", ":50051")
+grpcServer.Serve(lis)
+```
+
+## Authentication
+
+### Authenticator Interface
+
+```go
+type Authenticator interface {
+    // Authenticate validates credentials and returns an identity.
+    // Returns ErrUnauthorized if credentials are invalid.
+    Authenticate(ctx context.Context, token string) (string, error)
+}
+```
+
+### Built-in Implementations
+
+```go
+// Bearer token authentication
+auth := airport.BearerAuth(func(token string) (string, error) {
+    if token == "valid-token" {
+        return "user-identity", nil
+    }
+    return "", airport.ErrUnauthorized
+})
+
+// No authentication (default)
+auth := nil
+```
+
+### Getting Identity in Handlers
+
+```go
+func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    // Get authenticated identity from context
+    identity := airport.IdentityFromContext(ctx)
+    if identity != "" {
+        // User is authenticated
+    }
+    // ...
+}
+```
+
+## Utility Functions
+
+### catalog.ProjectSchema
+
+Projects an Arrow schema to include only specified columns:
+
+```go
+// Get full schema
+fullSchema := table.ArrowSchema(nil)
+
+// Project to specific columns
+projected := catalog.ProjectSchema(fullSchema, []string{"id", "name"})
+```
+
+### Context Helpers
+
+```go
+// Get identity from context
+identity := airport.IdentityFromContext(ctx)
+
+// Get transaction ID from context
+txID, ok := catalog.TransactionIDFromContext(ctx)
+
+// Add transaction ID to context
+ctx = catalog.WithTransactionID(ctx, txID)
+```
+
+### Error Types
+
+```go
+var (
+    // ErrUnauthorized is returned when authentication fails
+    ErrUnauthorized = errors.New("unauthorized")
+
+    // ErrNotFound is returned when a resource doesn't exist
+    ErrNotFound = errors.New("not found")
+
+    // ErrAlreadyExists is returned when creating an object that exists
+    ErrAlreadyExists = errors.New("already exists")
+
+    // ErrSchemaNotEmpty is returned when dropping non-empty schema
+    ErrSchemaNotEmpty = errors.New("schema contains tables")
+
+    // ErrNotImplemented is returned for unsupported operations
+    ErrNotImplemented = errors.New("not implemented")
+)
+```
+
+## Thread Safety
+
+All interface implementations must be safe for concurrent use:
+
+- Multiple goroutines may call Scan simultaneously
+- Schema/Table discovery may happen during scans
+- DDL operations may occur concurrently with queries
+
+Use appropriate synchronization in your implementations.

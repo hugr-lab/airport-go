@@ -32,7 +32,7 @@ Example catalog structure:
     - Table: sample (id INTEGER, name VARCHAR)
 
 Test with DuckDB CLI:
-  ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+  ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 ```
 
 ## Testing with DuckDB
@@ -49,7 +49,7 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Connect to the DDL server
-ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- View existing schema and table
 SELECT * FROM demo.main.sample;

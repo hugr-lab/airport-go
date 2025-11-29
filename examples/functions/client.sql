@@ -7,7 +7,7 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Connect to the functions demo server
-ATTACH 'grpc://localhost:50051' AS funcs (TYPE airport);
+ATTACH '' AS funcs (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- ========================================
 -- Scalar Function Examples

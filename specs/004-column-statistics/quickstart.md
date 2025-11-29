@@ -86,7 +86,7 @@ Statistics are automatically requested by DuckDB during query planning:
 
 ```sql
 -- Connect to your Airport server
-ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- This query triggers column_statistics for 'id' column
 SELECT * FROM demo.main.users WHERE id > 100;

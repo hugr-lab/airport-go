@@ -106,7 +106,7 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Connect to your Flight server
-ATTACH 'grpc://localhost:50051' AS my_server (TYPE AIRPORT);
+ATTACH '' AS my_server (TYPE AIRPORT, LOCATION 'grpc://localhost:50051');
 
 -- Query the users table
 SELECT * FROM my_server.main.users;
@@ -223,7 +223,7 @@ func (t *MyTable) RenameColumn(ctx context.Context, oldName, newName string, opt
 Test with DuckDB:
 
 ```sql
-ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- Schema operations
 CREATE SCHEMA demo.analytics;
@@ -261,8 +261,10 @@ You can either:
 ## Documentation
 
 - [GoDoc](https://pkg.go.dev/github.com/hugr-lab/airport-go) - Full API reference
+- [Protocol Overview](docs/protocol.md) - Airport protocol, Flight actions, message formats
+- [API Guide](docs/api-guide.md) - Interface documentation and server configuration
+- [Implementation Guide](docs/implementation.md) - Guide for implementing custom catalogs
 - [Examples](examples/) - Common usage patterns
-- [Specification](specs/001-001-flight-server/) - Complete design documents
 
 ## Performance Tips
 
@@ -442,21 +444,32 @@ go tool pprof mem.prof
 
 ## Project Structure
 
+The repository uses Go workspaces with three modules:
+
 ```
 airport-go/
+├── go.mod               # Main library (no DuckDB dependency)
+├── go.work              # Workspace configuration
+├── *.go                 # Root package files and unit tests
 ├── catalog/             # Catalog interfaces and types
-├── auth/               # Authentication (bearer token)
-├── flight/             # Flight server implementation
-├── internal/           # Internal packages (serialization, etc.)
-├── examples/           # Example server implementations
-│   ├── basic/         # Basic server example
-│   ├── auth/          # Authenticated server example
-│   ├── ddl/           # DDL operations (CREATE/DROP/ALTER)
-│   ├── dml/           # DML operations (INSERT/UPDATE/DELETE)
-│   └── dynamic/       # Dynamic catalog example
-├── tests/
-│   └── integration/   # Integration tests (requires DuckDB)
-└── *.go               # Root-level package files and unit tests
+├── auth/                # Authentication (bearer token)
+├── flight/              # Flight server implementation
+├── internal/            # Internal packages (serialization, etc.)
+├── docs/                # Protocol and API documentation
+│   ├── protocol.md     # Airport protocol overview
+│   ├── api-guide.md    # Interface documentation
+│   └── implementation.md # Implementation guide
+├── examples/            # Example implementations (separate module)
+│   ├── go.mod          # Examples module
+│   ├── basic/          # Basic server example
+│   ├── auth/           # Authenticated server example
+│   ├── ddl/            # DDL operations (CREATE/DROP/ALTER)
+│   ├── dml/            # DML operations (INSERT/UPDATE/DELETE)
+│   └── dynamic/        # Dynamic catalog example
+└── tests/               # Tests (separate module, with DuckDB)
+    ├── go.mod          # Tests module
+    ├── integration/    # Integration tests
+    └── benchmarks/     # Performance benchmarks
 ```
 
 ## Testing

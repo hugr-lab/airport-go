@@ -33,7 +33,7 @@ go run main.go
 You should see:
 ```
 Airport Flight server with functions listening on [::]:50051
-Connect with: ATTACH 'grpc://localhost:50051' AS my_server (TYPE airport)
+Connect with: ATTACH '' AS my_server (TYPE airport, LOCATION 'grpc://localhost:50051')
 
 Available functions:
   - Scalar: MULTIPLY(x INT64, factor INT64) -> INT64
@@ -54,7 +54,7 @@ Or interactively:
 ```sql
 INSTALL airport FROM community;
 LOAD airport;
-ATTACH 'grpc://localhost:50051' AS funcs (TYPE airport);
+ATTACH '' AS funcs (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- Generate series 1-5
 SELECT * FROM funcs.functions_demo.GENERATE_SERIES(1, 5);

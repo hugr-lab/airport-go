@@ -5,7 +5,7 @@
 //	duckdb
 //	INSTALL airport FROM community;
 //	LOAD airport;
-//	ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+//	ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 //
 //	-- Scalar function:
 //	SELECT MULTIPLY(value, 10) FROM demo.functions_demo.users;
@@ -64,7 +64,7 @@ func main() {
 	}
 
 	log.Printf("Airport Flight server with functions listening on %s", lis.Addr())
-	log.Printf("Connect with: ATTACH 'grpc://localhost:50051' AS my_server (TYPE airport)")
+	log.Printf("Connect with: ATTACH '' AS my_server (TYPE airport, LOCATION 'grpc://localhost:50051')")
 	log.Println("\nAvailable functions:")
 	log.Println("  - Scalar: MULTIPLY(x INT64, factor INT64) -> INT64")
 	log.Println("  - Table:  GENERATE_SERIES(start INT64, stop INT64, [step INT64]) -> (value INT64)")

@@ -46,7 +46,7 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Connect to the DML server
-ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 ```
 
 ### Basic DML Operations
