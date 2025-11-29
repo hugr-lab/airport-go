@@ -47,6 +47,7 @@ go test ./tests/integration/...
 - No silent failures - errors must be handled explicitly
 
 ## Recent Changes
+- 003-ddl-operations: DDL operations (CREATE/DROP SCHEMA, CREATE/DROP TABLE, ADD/REMOVE COLUMN), DynamicCatalog/Schema/Table interfaces, CTAS support
 - 002-dml-transactions: DML operations (INSERT/UPDATE/DELETE), transaction management, column projection
 - 001-001-flight-server: Flight server implementation, catalog builder, authentication
 - 001-repo-preparation: Repository setup, interfaces, CI/CD

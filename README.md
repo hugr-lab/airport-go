@@ -152,6 +152,77 @@ ATTACH 'grpc://localhost:50051' AS my_server (
 );
 ```
 
+## DDL Operations (CREATE/DROP/ALTER)
+
+Support schema and table management via SQL DDL statements:
+
+```go
+// Implement DynamicCatalog for CREATE/DROP SCHEMA
+type MyCatalog struct { /* ... */ }
+
+func (c *MyCatalog) CreateSchema(ctx context.Context, name string, opts catalog.CreateSchemaOptions) (catalog.Schema, error) {
+    // Create new schema
+    return newSchema, nil
+}
+
+func (c *MyCatalog) DropSchema(ctx context.Context, name string, opts catalog.DropSchemaOptions) error {
+    // Drop schema (fails if contains tables)
+    return nil
+}
+
+// Implement DynamicSchema for CREATE/DROP TABLE
+type MySchema struct { /* ... */ }
+
+func (s *MySchema) CreateTable(ctx context.Context, name string, schema *arrow.Schema, opts catalog.CreateTableOptions) (catalog.Table, error) {
+    // Create new table with given Arrow schema
+    return newTable, nil
+}
+
+func (s *MySchema) DropTable(ctx context.Context, name string, opts catalog.DropTableOptions) error {
+    // Drop table
+    return nil
+}
+
+// Implement DynamicTable for ALTER TABLE operations
+type MyTable struct { /* ... */ }
+
+func (t *MyTable) AddColumn(ctx context.Context, columnSchema *arrow.Schema, opts catalog.AddColumnOptions) error {
+    // Add column to table
+    return nil
+}
+
+func (t *MyTable) RemoveColumn(ctx context.Context, name string, opts catalog.RemoveColumnOptions) error {
+    // Remove column from table
+    return nil
+}
+
+func (t *MyTable) RenameColumn(ctx context.Context, oldName, newName string, opts catalog.RenameColumnOptions) error {
+    // Rename column
+    return nil
+}
+```
+
+Test with DuckDB:
+
+```sql
+ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+
+-- Schema operations
+CREATE SCHEMA demo.analytics;
+DROP SCHEMA demo.analytics;
+
+-- Table operations
+CREATE TABLE demo.main.users (id INTEGER, name VARCHAR);
+ALTER TABLE demo.main.users ADD COLUMN email VARCHAR;
+ALTER TABLE demo.main.users RENAME COLUMN name TO full_name;
+DROP TABLE demo.main.users;
+
+-- CREATE TABLE AS SELECT (requires InsertableTable)
+CREATE TABLE demo.main.backup AS SELECT * FROM demo.main.users;
+```
+
+See [examples/ddl](examples/ddl/) for a complete implementation.
+
 ## Architecture
 
 The package follows an interface-based design:
@@ -160,10 +231,14 @@ The package follows an interface-based design:
 - **Schema**: Interface for querying tables and functions
 - **Table**: Interface providing Arrow schema and scan function
 - **ScalarFunction**: Interface for custom scalar functions
+- **DynamicCatalog**: Extends Catalog with CREATE/DROP SCHEMA
+- **DynamicSchema**: Extends Schema with CREATE/DROP/RENAME TABLE
+- **DynamicTable**: Extends Table with ADD/DROP/RENAME COLUMN
 
 You can either:
 - Use `NewCatalogBuilder()` for static catalogs (quickest)
 - Implement the `Catalog` interface for dynamic catalogs
+- Implement `DynamicCatalog`/`DynamicSchema`/`DynamicTable` for DDL support
 
 ## Documentation
 
@@ -358,6 +433,8 @@ airport-go/
 ├── examples/           # Example server implementations
 │   ├── basic/         # Basic server example
 │   ├── auth/          # Authenticated server example
+│   ├── ddl/           # DDL operations (CREATE/DROP/ALTER)
+│   ├── dml/           # DML operations (INSERT/UPDATE/DELETE)
 │   └── dynamic/       # Dynamic catalog example
 ├── tests/
 │   └── integration/   # Integration tests (requires DuckDB)

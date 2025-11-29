@@ -24,16 +24,15 @@
 - [x] Transaction manager interface
 - [x] Column projection (ArrowSchema with columns parameter)
 
-## Next: 003-ddl-operations
+### 003-ddl-operations
 
-DDL operations implementation:
-
-- [ ] CreateSchema, DropSchema actions
-- [ ] CreateTable, DropTable actions
-- [ ] AlterTableAddColumn, AlterTableDropColumn actions
-- [ ] DynamicCatalog/Schema/Table interfaces
-- [ ] Builder methods for dynamic schema modification
-- [ ] Integration tests and examples
+- [x] CreateSchema, DropSchema actions
+- [x] CreateTable, DropTable actions
+- [x] AddColumn, RemoveColumn actions
+- [x] DynamicCatalog/Schema/Table interfaces
+- [x] CREATE TABLE AS SELECT support (CTAS)
+- [x] Integration tests and examples
+- [x] DuckDB metadata verification
 
 Reference: <https://airport.query.farm/server_actions.html>
 
