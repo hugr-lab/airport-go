@@ -1,20 +1,121 @@
-package airport
+// Package benchmarks provides performance benchmarks for the airport-go Flight server.
+// These benchmarks use DuckDB's Airport extension as the Flight client to measure
+// end-to-end performance through the Flight protocol.
+package benchmarks
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"log/slog"
+	"net"
 	"testing"
+	"time"
+
+	"google.golang.org/grpc"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 
+	"github.com/hugr-lab/airport-go"
 	"github.com/hugr-lab/airport-go/catalog"
 	"github.com/hugr-lab/airport-go/internal/serialize"
+
+	_ "github.com/duckdb/duckdb-go/v2"
 )
 
+// benchCatalogName is the catalog name used for all benchmark attachments.
+const benchCatalogName = "bench_cat"
+
+// benchServer wraps a Flight server for benchmarking.
+type benchServer struct {
+	grpcServer *grpc.Server
+	listener   net.Listener
+	address    string
+}
+
+// newBenchServer creates and starts a benchmark Flight server.
+func newBenchServer(b *testing.B, cat catalog.Catalog) *benchServer {
+	b.Helper()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("Failed to create listener: %v", err)
+	}
+
+	// Configure server with minimal logging for benchmarks
+	warnLevel := slog.LevelWarn
+	config := airport.ServerConfig{
+		Catalog:  cat,
+		Address:  lis.Addr().String(),
+		LogLevel: &warnLevel,
+	}
+
+	opts := airport.ServerOptions(config)
+	grpcServer := grpc.NewServer(opts...)
+
+	if err := airport.NewServer(grpcServer, config); err != nil {
+		b.Fatalf("Failed to register server: %v", err)
+	}
+
+	go func() {
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	return &benchServer{
+		grpcServer: grpcServer,
+		listener:   lis,
+		address:    lis.Addr().String(),
+	}
+}
+
+func (s *benchServer) stop() {
+	s.grpcServer.GracefulStop()
+	s.listener.Close()
+}
+
+// openDuckDB opens a DuckDB connection with the Airport extension loaded.
+func openDuckDB(b *testing.B) *sql.DB {
+	b.Helper()
+
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		b.Fatalf("DuckDB not available: %v", err)
+	}
+
+	_, err = db.Exec("INSTALL airport FROM community")
+	if err != nil {
+		b.Fatalf("Airport extension not available: %v", err)
+	}
+
+	_, err = db.Exec("LOAD airport")
+	if err != nil {
+		b.Fatalf("Failed to load Airport extension: %v", err)
+	}
+
+	return db
+}
+
+// attachServer attaches a Flight server to DuckDB as a catalog using benchCatalogName.
+func attachServer(b *testing.B, db *sql.DB, address string) {
+	b.Helper()
+
+	query := fmt.Sprintf("ATTACH '' AS %s (TYPE airport, LOCATION 'grpc://%s')", benchCatalogName, address)
+	_, err := db.Exec(query)
+	if err != nil {
+		b.Fatalf("Failed to attach server: %v", err)
+	}
+}
+
 // BenchmarkCatalogSerialization benchmarks catalog metadata serialization.
+// This tests the internal serialization performance.
 func BenchmarkCatalogSerialization(b *testing.B) {
-	// Create a moderately complex catalog
 	schemas := make([]catalog.Schema, 0, 10)
 	for i := 0; i < 10; i++ {
 		tables := make([]catalog.Table, 0, 5)
@@ -26,14 +127,14 @@ func BenchmarkCatalogSerialization(b *testing.B) {
 			}, nil)
 
 			table := &benchTable{
-				name:   "table_" + string(rune('a'+j)),
+				name:   fmt.Sprintf("table_%c", 'a'+j),
 				schema: arrowSchema,
 			}
 			tables = append(tables, table)
 		}
 
 		schema := &benchSchema{
-			name:   "schema_" + string(rune('0'+i)),
+			name:   fmt.Sprintf("schema_%d", i),
 			tables: tables,
 		}
 		schemas = append(schemas, schema)
@@ -55,29 +156,30 @@ func BenchmarkCatalogSerialization(b *testing.B) {
 	}
 
 	b.StopTimer()
-	// Report compression ratio
 	data, _ := serialize.SerializeCatalog(ctx, cat, allocator)
 	b.ReportMetric(float64(len(data)), "bytes")
 }
 
-// BenchmarkTableScan benchmarks scanning a table with varying row counts.
+// BenchmarkTableScan benchmarks scanning a table through the Flight protocol.
+// This measures end-to-end query performance using DuckDB as client.
 func BenchmarkTableScan(b *testing.B) {
 	rowCounts := []int{100, 1000, 10000}
 
 	for _, rows := range rowCounts {
-		b.Run("rows_"+string(rune('0'+rows/100)), func(b *testing.B) {
+		b.Run(fmt.Sprintf("rows_%d", rows), func(b *testing.B) {
 			schema := arrow.NewSchema([]arrow.Field{
 				{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 				{Name: "value", Type: arrow.PrimitiveTypes.Float64},
 			}, nil)
 
+			rowCount := rows
 			scanFunc := func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 				builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 				defer builder.Release()
 
-				ids := make([]int64, rows)
-				values := make([]float64, rows)
-				for i := 0; i < rows; i++ {
+				ids := make([]int64, rowCount)
+				values := make([]float64, rowCount)
+				for i := 0; i < rowCount; i++ {
 					ids[i] = int64(i)
 					values[i] = float64(i) * 1.5
 				}
@@ -91,42 +193,45 @@ func BenchmarkTableScan(b *testing.B) {
 				return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 			}
 
-			cat, _ := NewCatalogBuilder().
+			cat, _ := airport.NewCatalogBuilder().
 				Schema("bench").
-				SimpleTable(SimpleTableDef{
+				SimpleTable(airport.SimpleTableDef{
 					Name:     "data",
 					Schema:   schema,
 					ScanFunc: scanFunc,
 				}).
 				Build()
 
-			ctx := context.Background()
-			testSchema, _ := cat.Schema(ctx, "bench")
-			table, _ := testSchema.Table(ctx, "data")
+			server := newBenchServer(b, cat)
+			defer server.stop()
+
+			db := openDuckDB(b)
+			defer db.Close()
+
+			attachServer(b, db, server.address)
 
 			b.ResetTimer()
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				reader, err := table.Scan(ctx, &catalog.ScanOptions{})
+				rows, err := db.Query("SELECT * FROM bench_cat.bench.data")
 				if err != nil {
-					b.Fatalf("Scan failed: %v", err)
+					b.Fatalf("Query failed: %v", err)
 				}
 
-				rowCount := int64(0)
-				for reader.Next() {
-					rowCount += reader.RecordBatch().NumRows()
+				count := 0
+				for rows.Next() {
+					count++
 				}
+				rows.Close()
 
-				reader.Release()
-
-				if rowCount != int64(rows) {
-					b.Fatalf("Expected %d rows, got %d", rows, rowCount)
+				if count != rowCount {
+					b.Fatalf("Expected %d rows, got %d", rowCount, count)
 				}
 			}
 
 			b.StopTimer()
-			b.ReportMetric(float64(rows), "rows/scan")
+			b.ReportMetric(float64(rowCount), "rows/scan")
 		})
 	}
 }
@@ -136,7 +241,7 @@ func BenchmarkCatalogBuilder(b *testing.B) {
 	tableCounts := []int{1, 10, 100}
 
 	for _, tableCount := range tableCounts {
-		b.Run("tables_"+string(rune('0'+tableCount/10)), func(b *testing.B) {
+		b.Run(fmt.Sprintf("tables_%d", tableCount), func(b *testing.B) {
 			schema := arrow.NewSchema([]arrow.Field{
 				{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 			}, nil)
@@ -153,11 +258,11 @@ func BenchmarkCatalogBuilder(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				builder := NewCatalogBuilder().Schema("test")
+				builder := airport.NewCatalogBuilder().Schema("test")
 
 				for j := 0; j < tableCount; j++ {
-					builder.SimpleTable(SimpleTableDef{
-						Name:     "table_" + string(rune('a'+j)),
+					builder.SimpleTable(airport.SimpleTableDef{
+						Name:     fmt.Sprintf("table_%d", j),
 						Schema:   schema,
 						ScanFunc: scanFunc,
 					})
@@ -186,14 +291,13 @@ func BenchmarkRecordBuilding(b *testing.B) {
 
 	allocator := memory.DefaultAllocator
 
-	// Pre-generate test data
 	intData := make([]int64, 1000)
 	strData := make([]string, 1000)
 	floatData := make([]float64, 1000)
 
 	for i := 0; i < 1000; i++ {
 		intData[i] = int64(i)
-		strData[i] = "value_" + string(rune('a'+(i%26)))
+		strData[i] = fmt.Sprintf("value_%c", 'a'+(i%26))
 		floatData[i] = float64(i) * 1.1
 	}
 
@@ -216,7 +320,7 @@ func BenchmarkRecordBuilding(b *testing.B) {
 	b.ReportMetric(1000, "rows/record")
 }
 
-// BenchmarkConcurrentScans benchmarks concurrent table scans.
+// BenchmarkConcurrentScans benchmarks concurrent table scans through Flight.
 func BenchmarkConcurrentScans(b *testing.B) {
 	schema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
@@ -238,34 +342,38 @@ func BenchmarkConcurrentScans(b *testing.B) {
 		return array.NewRecordReader(schema, []arrow.RecordBatch{record})
 	}
 
-	cat, _ := NewCatalogBuilder().
+	cat, _ := airport.NewCatalogBuilder().
 		Schema("bench").
-		SimpleTable(SimpleTableDef{
+		SimpleTable(airport.SimpleTableDef{
 			Name:     "data",
 			Schema:   schema,
 			ScanFunc: scanFunc,
 		}).
 		Build()
 
-	ctx := context.Background()
-	testSchema, _ := cat.Schema(ctx, "bench")
-	table, _ := testSchema.Table(ctx, "data")
+	server := newBenchServer(b, cat)
+	defer server.stop()
+
+	db := openDuckDB(b)
+	defer db.Close()
+
+	attachServer(b, db, server.address)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			reader, err := table.Scan(ctx, &catalog.ScanOptions{})
+			rows, err := db.Query("SELECT * FROM bench_cat.bench.data")
 			if err != nil {
-				b.Fatalf("Scan failed: %v", err)
+				b.Fatalf("Query failed: %v", err)
 			}
 
-			for reader.Next() {
-				_ = reader.RecordBatch()
+			for rows.Next() {
+				var id int64
+				rows.Scan(&id)
 			}
-
-			reader.Release()
+			rows.Close()
 		}
 	})
 }

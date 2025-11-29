@@ -6,7 +6,7 @@
 //	duckdb
 //	INSTALL airport FROM community;
 //	LOAD airport;
-//	ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+//	ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 //
 //	-- Basic DML operations:
 //	INSERT INTO demo.main.users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');
@@ -83,7 +83,7 @@ func main() {
 	log.Println("    - Table: users (writable with transaction support)")
 	log.Println("")
 	log.Println("Test with DuckDB CLI:")
-	log.Println("  ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);")
+	log.Println("  ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');")
 	log.Println("")
 	log.Println("  -- Basic DML:")
 	log.Println("  INSERT INTO demo.main.users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');")

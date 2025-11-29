@@ -48,6 +48,16 @@ Reference: <https://airport.query.farm/server_actions.html>
 
 Reference: <https://airport.query.farm/server_action_column_statistics.html>
 
+### 005-module-reorganization
+
+- [x] Separate go.mod for examples
+- [x] Separate go.mod for integration tests
+- [x] Refactor benchmarks to use DuckDB as client
+- [x] Remove unused packages from go.mod
+- [x] Update documentation for new structure
+- [x] Create a comprehensive documentation for protocol and package usage in the separate docs folder
+- [x] Go workspace configuration (go.work)
+
 ## Future Features
 
 ### Filter Pushdown
@@ -55,9 +65,3 @@ Reference: <https://airport.query.farm/server_action_column_statistics.html>
 - [ ] Parse filters to basic expressions (AND, OR, =, <, >, IN)
 - [ ] Return parsed filters in ScanOptions
 - [ ] Integration tests for filter handling
-
-### Module Reorganization
-
-- [ ] Separate go.mod for examples
-- [ ] Separate go.mod for integration tests
-- [ ] Refactor benchmarks to use DuckDB as client

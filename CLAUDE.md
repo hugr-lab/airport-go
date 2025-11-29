@@ -7,21 +7,35 @@ Auto-generated from all feature plans. Last updated: 2025-11-29
 - Storage-agnostic via catalog.Catalog interface
 - Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go, ZStandard (004-column-statistics)
 - N/A (storage-agnostic; delegated to user implementations) (004-column-statistics)
+- N/A (library, storage-agnostic) (005-module-reorganization)
 
 ## Project Structure
 
+The repository uses Go workspaces with three modules:
+
 ```text
-# Repository root contains airport package (github.com/hugr-lab/airport-go)
+# Main library module (github.com/hugr-lab/airport-go)
+go.mod                   # Main library (no DuckDB dependency)
+go.work                  # Workspace configuration
 *.go                     # Root package files (server.go, config.go, etc.)
 catalog/                 # Subpackage: catalog interfaces and builder
 flight/                  # Subpackage: Flight RPC handler implementations
 auth/                    # Subpackage: authentication implementations
 internal/                # Internal utilities (not public API)
-examples/                # Example usage code
-testutil/                # Test utilities for integration tests
+docs/                    # Protocol and API documentation
 
+# Examples module (github.com/hugr-lab/airport-go/examples)
+examples/
+├── go.mod               # Examples module
+├── basic/               # Basic server example
+├── auth/                # Authenticated server example
+├── ddl/                 # DDL operations example
+├── dml/                 # DML operations example
+└── dynamic/             # Dynamic catalog example
+
+# Tests module (github.com/hugr-lab/airport-go/tests)
 tests/
-├── unit/                # Unit tests (co-located with source: *_test.go)
+├── go.mod               # Tests module (with DuckDB)
 ├── integration/         # Integration tests with DuckDB
 └── benchmarks/          # Performance benchmarks
 ```
@@ -29,7 +43,7 @@ tests/
 ## Commands
 
 ```bash
-# Run all tests
+# Run unit tests (main module only)
 go test ./...
 
 # Run with race detector
@@ -38,8 +52,17 @@ go test -race ./...
 # Run linter
 golangci-lint run ./...
 
-# Run integration tests only
-go test ./tests/integration/...
+# Run integration tests (requires DuckDB with Airport extension)
+cd tests && go test ./integration/...
+
+# Run benchmarks
+cd tests && go test -bench=. ./benchmarks/...
+
+# Build examples
+cd examples && go build ./...
+
+# Sync workspace
+go work sync
 ```
 
 ## Code Style
@@ -49,9 +72,9 @@ go test ./tests/integration/...
 - No silent failures - errors must be handled explicitly
 
 ## Recent Changes
+- 005-module-reorganization: Added Go 1.25+
 - 004-column-statistics: Added Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go, ZStandard
 - 003-ddl-operations: DDL operations (CREATE/DROP SCHEMA, CREATE/DROP TABLE, ADD/REMOVE COLUMN), DynamicCatalog/Schema/Table interfaces, CTAS support
-- 002-dml-transactions: DML operations (INSERT/UPDATE/DELETE), transaction management, column projection
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

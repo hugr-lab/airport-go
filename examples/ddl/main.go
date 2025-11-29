@@ -7,7 +7,7 @@
 //	duckdb
 //	INSTALL airport FROM community;
 //	LOAD airport;
-//	ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);
+//	ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 //
 //	-- Schema operations:
 //	CREATE SCHEMA demo.analytics;
@@ -82,7 +82,7 @@ func main() {
 	log.Println("    - Table: sample (id INTEGER, name VARCHAR)")
 	log.Println("")
 	log.Println("Test with DuckDB CLI:")
-	log.Println("  ATTACH 'grpc://localhost:50051' AS demo (TYPE airport);")
+	log.Println("  ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');")
 	log.Println("")
 	log.Println("  -- Schema operations:")
 	log.Println("  CREATE SCHEMA demo.analytics;")

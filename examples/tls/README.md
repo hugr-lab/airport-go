@@ -32,7 +32,7 @@ go run main.go
 ### Basic TLS
 
 ```sql
-ATTACH 'grpc+tls://localhost:50051' AS secure_data (TYPE airport);
+ATTACH '' AS secure_data (TYPE airport, LOCATION 'grpc+tls://localhost:50051');
 SELECT * FROM secure_data.secure.messages;
 ```
 
