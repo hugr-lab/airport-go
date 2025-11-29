@@ -65,7 +65,7 @@ func BenchmarkLargeDataTransfer(b *testing.B) {
 	db := openDuckDB(b)
 	defer db.Close()
 
-	attachServer(b, db, server.address, "bench_cat")
+	attachServer(b, db, server.address)
 
 	// Warm-up run
 	warmupQuery := "SELECT COUNT(*) FROM bench_cat.bench.large_data"
@@ -140,7 +140,7 @@ func BenchmarkLargeDataAggregation(b *testing.B) {
 	db := openDuckDB(b)
 	defer db.Close()
 
-	attachServer(b, db, server.address, "bench_cat")
+	attachServer(b, db, server.address)
 
 	// Test different aggregation queries
 	queries := []struct {
@@ -222,7 +222,7 @@ func BenchmarkCTASLargeData(b *testing.B) {
 	db := openDuckDB(b)
 	defer db.Close()
 
-	attachServer(b, db, server.address, "bench_cat")
+	attachServer(b, db, server.address)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -293,7 +293,7 @@ func BenchmarkColumnProjection(b *testing.B) {
 	db := openDuckDB(b)
 	defer db.Close()
 
-	attachServer(b, db, server.address, "bench_cat")
+	attachServer(b, db, server.address)
 
 	projections := []struct {
 		name    string
@@ -383,12 +383,12 @@ type largeDataReader struct {
 	currentRow int
 	allocator  memory.Allocator
 	ctx        context.Context
-	current    arrow.Record
+	current    arrow.RecordBatch
 }
 
-func (r *largeDataReader) Schema() *arrow.Schema      { return r.schema }
-func (r *largeDataReader) Record() arrow.Record       { return r.current }
-func (r *largeDataReader) RecordBatch() arrow.Record  { return r.current }
+func (r *largeDataReader) Schema() *arrow.Schema           { return r.schema }
+func (r *largeDataReader) Record() arrow.RecordBatch       { return r.current }
+func (r *largeDataReader) RecordBatch() arrow.RecordBatch  { return r.current }
 func (r *largeDataReader) Err() error                 { return nil }
 func (r *largeDataReader) Retain()                    {}
 func (r *largeDataReader) Release() {
@@ -462,7 +462,7 @@ func (r *largeDataReader) Next() bool {
 		}
 	}
 
-	r.current = builder.NewRecord()
+	r.current = builder.NewRecordBatch()
 	r.currentRow += currentBatchSize
 	return true
 }
@@ -643,7 +643,7 @@ type benchDynamicTable struct {
 	mu      sync.RWMutex
 	name    string
 	schema  *arrow.Schema
-	records []arrow.Record
+	records []arrow.RecordBatch
 }
 
 func (t *benchDynamicTable) Name() string    { return t.name }
@@ -660,7 +660,7 @@ func (t *benchDynamicTable) Scan(ctx context.Context, opts *catalog.ScanOptions)
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	records := make([]arrow.Record, len(t.records))
+	records := make([]arrow.RecordBatch, len(t.records))
 	for i, rec := range t.records {
 		rec.Retain()
 		records[i] = rec
@@ -674,7 +674,7 @@ func (t *benchDynamicTable) Insert(ctx context.Context, rows array.RecordReader)
 
 	var count int64
 	for rows.Next() {
-		rec := rows.Record()
+		rec := rows.RecordBatch()
 		rec.Retain()
 		t.records = append(t.records, rec)
 		count += rec.NumRows()

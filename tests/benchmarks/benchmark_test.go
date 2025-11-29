@@ -26,6 +26,9 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 )
 
+// benchCatalogName is the catalog name used for all benchmark attachments.
+const benchCatalogName = "bench_cat"
+
 // benchServer wraps a Flight server for benchmarking.
 type benchServer struct {
 	grpcServer *grpc.Server
@@ -99,11 +102,11 @@ func openDuckDB(b *testing.B) *sql.DB {
 	return db
 }
 
-// attachServer attaches a Flight server to DuckDB as a catalog.
-func attachServer(b *testing.B, db *sql.DB, address, name string) {
+// attachServer attaches a Flight server to DuckDB as a catalog using benchCatalogName.
+func attachServer(b *testing.B, db *sql.DB, address string) {
 	b.Helper()
 
-	query := fmt.Sprintf("ATTACH '' AS %s (TYPE airport, LOCATION 'grpc://%s')", name, address)
+	query := fmt.Sprintf("ATTACH '' AS %s (TYPE airport, LOCATION 'grpc://%s')", benchCatalogName, address)
 	_, err := db.Exec(query)
 	if err != nil {
 		b.Fatalf("Failed to attach server: %v", err)
@@ -205,7 +208,7 @@ func BenchmarkTableScan(b *testing.B) {
 			db := openDuckDB(b)
 			defer db.Close()
 
-			attachServer(b, db, server.address, "bench_cat")
+			attachServer(b, db, server.address)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -354,7 +357,7 @@ func BenchmarkConcurrentScans(b *testing.B) {
 	db := openDuckDB(b)
 	defer db.Close()
 
-	attachServer(b, db, server.address, "bench_cat")
+	attachServer(b, db, server.address)
 
 	b.ResetTimer()
 	b.ReportAllocs()
