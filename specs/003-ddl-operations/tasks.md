@@ -27,14 +27,14 @@ Based on plan.md project structure:
 
 **Purpose**: Create new files and define foundational types shared across all user stories
 
-- [ ] T001 Create catalog/dynamic.go with sentinel errors (ErrAlreadyExists, ErrNotFound, ErrSchemaNotEmpty)
-- [ ] T002 [P] Define OnConflict type and constants in catalog/dynamic.go
-- [ ] T003 [P] Define CreateSchemaOptions struct in catalog/dynamic.go
-- [ ] T004 [P] Define DropSchemaOptions struct in catalog/dynamic.go
-- [ ] T005 [P] Define CreateTableOptions struct in catalog/dynamic.go
-- [ ] T006 [P] Define DropTableOptions struct in catalog/dynamic.go
-- [ ] T007 [P] Define AddColumnOptions struct in catalog/dynamic.go
-- [ ] T008 [P] Define RemoveColumnOptions struct in catalog/dynamic.go
+- [x] T001 Create catalog/dynamic.go with sentinel errors (ErrAlreadyExists, ErrNotFound, ErrSchemaNotEmpty)
+- [x] T002 [P] Define OnConflict type and constants in catalog/dynamic.go
+- [x] T003 [P] Define CreateSchemaOptions struct in catalog/dynamic.go
+- [x] T004 [P] Define DropSchemaOptions struct in catalog/dynamic.go
+- [x] T005 [P] Define CreateTableOptions struct in catalog/dynamic.go
+- [x] T006 [P] Define DropTableOptions struct in catalog/dynamic.go
+- [x] T007 [P] Define AddColumnOptions struct in catalog/dynamic.go
+- [x] T008 [P] Define RemoveColumnOptions struct in catalog/dynamic.go
 
 ---
 
@@ -44,15 +44,15 @@ Based on plan.md project structure:
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T009 Define DynamicCatalog interface in catalog/dynamic.go (extends Catalog with CreateSchema, DropSchema)
-- [ ] T010 Define DynamicSchema interface in catalog/dynamic.go (extends Schema with CreateTable, DropTable)
-- [ ] T011 Define DynamicTable interface in catalog/dynamic.go (extends Table with AddColumn, RemoveColumn)
-- [ ] T012 Create flight/doaction_ddl.go with package declaration and imports
-- [ ] T013 [P] Define msgpack request parameter structs in flight/doaction_ddl.go (CreateSchemaParams, DropSchemaParams, CreateTableParams, DropTableParams, AddColumnParams, RemoveColumnParams)
-- [ ] T014 Update flight/doaction.go switch statement to route create_schema, drop_schema to new handlers
-- [ ] T015 Update flight/doaction.go switch statement to route create_table, drop_table to new handlers
-- [ ] T016 Update flight/doaction.go switch statement to route add_column, remove_column to new handlers
-- [ ] T017 Create tests/integration/dynamic_catalog_test.go with mockDynamicCatalog, mockDynamicSchema, mockDynamicTable implementations
+- [x] T009 Define DynamicCatalog interface in catalog/dynamic.go (extends Catalog with CreateSchema, DropSchema)
+- [x] T010 Define DynamicSchema interface in catalog/dynamic.go (extends Schema with CreateTable, DropTable)
+- [x] T011 Define DynamicTable interface in catalog/dynamic.go (extends Table with AddColumn, RemoveColumn)
+- [x] T012 Create flight/doaction_ddl.go with package declaration and imports
+- [x] T013 [P] Define msgpack request parameter structs in flight/doaction_ddl.go (CreateSchemaParams, DropSchemaParams, CreateTableParams, DropTableParams, AddColumnParams, RemoveColumnParams)
+- [x] T014 Update flight/doaction.go switch statement to route create_schema, drop_schema to new handlers
+- [x] T015 Update flight/doaction.go switch statement to route create_table, drop_table to new handlers
+- [x] T016 Update flight/doaction.go switch statement to route add_column, remove_column to new handlers
+- [x] T017 Create tests/integration/dynamic_catalog_test.go with mockDynamicCatalog, mockDynamicSchema, mockDynamicTable implementations
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -66,16 +66,16 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 1
 
-- [ ] T018 [US1] Implement handleCreateSchema in flight/doaction_ddl.go - decode msgpack params
-- [ ] T019 [US1] Implement handleCreateSchema DynamicCatalog type assertion and error for non-dynamic
-- [ ] T020 [US1] Implement handleCreateSchema validation (empty schema name returns InvalidArgument)
-- [ ] T021 [US1] Implement handleCreateSchema call to DynamicCatalog.CreateSchema with options
-- [ ] T022 [US1] Implement handleCreateSchema response serialization (AirportSerializedContentsWithSHA256Hash)
-- [ ] T023 [US1] Implement handleCreateSchema error mapping (ErrAlreadyExists to codes.AlreadyExists)
-- [ ] T024 [US1] Add mockDynamicCatalog.CreateSchema implementation in tests/integration/dynamic_catalog_test.go
-- [ ] T025 [US1] Add TestDDLCreateSchema integration test using DuckDB client in tests/integration/ddl_test.go
-- [ ] T026 [US1] Add TestDDLCreateSchemaAlreadyExists test case in tests/integration/ddl_test.go
-- [ ] T027 [US1] Add TestDDLCreateSchemaOnStaticCatalog test case in tests/integration/ddl_test.go
+- [x] T018 [US1] Implement handleCreateSchema in flight/doaction_ddl.go - decode msgpack params
+- [x] T019 [US1] Implement handleCreateSchema DynamicCatalog type assertion and error for non-dynamic
+- [x] T020 [US1] Implement handleCreateSchema validation (empty schema name returns InvalidArgument)
+- [x] T021 [US1] Implement handleCreateSchema call to DynamicCatalog.CreateSchema with options
+- [x] T022 [US1] Implement handleCreateSchema response serialization (AirportSerializedContentsWithSHA256Hash)
+- [x] T023 [US1] Implement handleCreateSchema error mapping (ErrAlreadyExists to codes.AlreadyExists)
+- [x] T024 [US1] Add mockDynamicCatalog.CreateSchema implementation in tests/integration/dynamic_catalog_test.go
+- [x] T025 [US1] Add TestDDLCreateSchema integration test using DuckDB client in tests/integration/ddl_test.go
+- [x] T026 [US1] Add TestDDLCreateSchemaAlreadyExists test case in tests/integration/ddl_test.go
+- [x] T027 [US1] Add TestDDLCreateSchemaOnStaticCatalog test case in tests/integration/ddl_test.go
 
 **Checkpoint**: User Story 1 complete - create_schema action functional and tested
 
@@ -89,17 +89,17 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 2
 
-- [ ] T028 [US2] Implement handleCreateTable in flight/doaction_ddl.go - decode msgpack params
-- [ ] T029 [US2] Implement handleCreateTable schema lookup and DynamicSchema type assertion
-- [ ] T030 [US2] Implement handleCreateTable Arrow schema deserialization using flight.DeserializeSchema
-- [ ] T031 [US2] Implement handleCreateTable on_conflict parameter handling (error/ignore/replace)
-- [ ] T032 [US2] Implement handleCreateTable call to DynamicSchema.CreateTable with options
-- [ ] T033 [US2] Implement handleCreateTable FlightInfo response generation
-- [ ] T034 [US2] Implement handleCreateTable error mapping (NotFound, AlreadyExists, InvalidArgument)
-- [ ] T035 [US2] Add mockDynamicSchema.CreateTable implementation in tests/integration/dynamic_catalog_test.go
-- [ ] T036 [US2] Add TestDDLCreateTable integration test using DuckDB client in tests/integration/ddl_test.go
-- [ ] T037 [US2] Add TestDDLCreateTableOnConflictIgnore test case in tests/integration/ddl_test.go
-- [ ] T038 [US2] Add TestDDLCreateTableOnConflictReplace test case in tests/integration/ddl_test.go
+- [x] T028 [US2] Implement handleCreateTable in flight/doaction_ddl.go - decode msgpack params
+- [x] T029 [US2] Implement handleCreateTable schema lookup and DynamicSchema type assertion
+- [x] T030 [US2] Implement handleCreateTable Arrow schema deserialization using flight.DeserializeSchema
+- [x] T031 [US2] Implement handleCreateTable on_conflict parameter handling (error/ignore/replace)
+- [x] T032 [US2] Implement handleCreateTable call to DynamicSchema.CreateTable with options
+- [x] T033 [US2] Implement handleCreateTable FlightInfo response generation
+- [x] T034 [US2] Implement handleCreateTable error mapping (NotFound, AlreadyExists, InvalidArgument)
+- [x] T035 [US2] Add mockDynamicSchema.CreateTable implementation in tests/integration/dynamic_catalog_test.go
+- [x] T036 [US2] Add TestDDLCreateTable integration test using DuckDB client in tests/integration/ddl_test.go
+- [x] T037 [US2] Add TestDDLCreateTableOnConflictIgnore test case in tests/integration/ddl_test.go
+- [x] T038 [US2] Add TestDDLCreateTableOnConflictReplace test case in tests/integration/ddl_test.go
 
 **Checkpoint**: User Stories 1 AND 2 complete - can create schemas and tables
 
@@ -113,15 +113,15 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 3
 
-- [ ] T039 [US3] Implement handleDropSchema in flight/doaction_ddl.go - decode msgpack params
-- [ ] T040 [US3] Implement handleDropSchema DynamicCatalog type assertion
-- [ ] T041 [US3] Implement handleDropSchema ignore_not_found parameter handling
-- [ ] T042 [US3] Implement handleDropSchema call to DynamicCatalog.DropSchema
-- [ ] T043 [US3] Implement handleDropSchema error mapping (NotFound, SchemaNotEmpty to FailedPrecondition)
-- [ ] T044 [US3] Add mockDynamicCatalog.DropSchema implementation with table count check in tests/integration/dynamic_catalog_test.go
-- [ ] T045 [US3] Add TestDDLDropSchema integration test in tests/integration/ddl_test.go
-- [ ] T046 [US3] Add TestDDLDropSchemaNotFound test case in tests/integration/ddl_test.go
-- [ ] T047 [US3] Add TestDDLDropSchemaWithTables test case (expects error) in tests/integration/ddl_test.go
+- [x] T039 [US3] Implement handleDropSchema in flight/doaction_ddl.go - decode msgpack params
+- [x] T040 [US3] Implement handleDropSchema DynamicCatalog type assertion
+- [x] T041 [US3] Implement handleDropSchema ignore_not_found parameter handling
+- [x] T042 [US3] Implement handleDropSchema call to DynamicCatalog.DropSchema
+- [x] T043 [US3] Implement handleDropSchema error mapping (NotFound, SchemaNotEmpty to FailedPrecondition)
+- [x] T044 [US3] Add mockDynamicCatalog.DropSchema implementation with table count check in tests/integration/dynamic_catalog_test.go
+- [x] T045 [US3] Add TestDDLDropSchema integration test in tests/integration/ddl_test.go
+- [x] T046 [US3] Add TestDDLDropSchemaNotFound test case in tests/integration/ddl_test.go
+- [x] T047 [US3] Add TestDDLDropSchemaWithTables test case (expects error) in tests/integration/ddl_test.go
 
 **Checkpoint**: User Story 3 complete - full schema lifecycle (create/drop)
 
@@ -135,14 +135,14 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 4
 
-- [ ] T048 [US4] Implement handleDropTable in flight/doaction_ddl.go - decode msgpack params
-- [ ] T049 [US4] Implement handleDropTable schema lookup and DynamicSchema type assertion
-- [ ] T050 [US4] Implement handleDropTable ignore_not_found parameter handling
-- [ ] T051 [US4] Implement handleDropTable call to DynamicSchema.DropTable
-- [ ] T052 [US4] Implement handleDropTable error mapping (NotFound, Unimplemented)
-- [ ] T053 [US4] Add mockDynamicSchema.DropTable implementation in tests/integration/dynamic_catalog_test.go
-- [ ] T054 [US4] Add TestDDLDropTable integration test in tests/integration/ddl_test.go
-- [ ] T055 [US4] Add TestDDLDropTableNotFound test case in tests/integration/ddl_test.go
+- [x] T048 [US4] Implement handleDropTable in flight/doaction_ddl.go - decode msgpack params
+- [x] T049 [US4] Implement handleDropTable schema lookup and DynamicSchema type assertion
+- [x] T050 [US4] Implement handleDropTable ignore_not_found parameter handling
+- [x] T051 [US4] Implement handleDropTable call to DynamicSchema.DropTable
+- [x] T052 [US4] Implement handleDropTable error mapping (NotFound, Unimplemented)
+- [x] T053 [US4] Add mockDynamicSchema.DropTable implementation in tests/integration/dynamic_catalog_test.go
+- [x] T054 [US4] Add TestDDLDropTable integration test in tests/integration/ddl_test.go
+- [x] T055 [US4] Add TestDDLDropTableNotFound test case in tests/integration/ddl_test.go
 
 **Checkpoint**: User Stories 1-4 complete - full schema and table lifecycle
 
@@ -156,15 +156,15 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 5
 
-- [ ] T056 [US5] Implement handleAddColumn in flight/doaction_ddl.go - decode msgpack params
-- [ ] T057 [US5] Implement handleAddColumn table lookup and DynamicTable type assertion
-- [ ] T058 [US5] Implement handleAddColumn column schema deserialization and validation (single field)
-- [ ] T059 [US5] Implement handleAddColumn if_column_not_exists parameter handling
-- [ ] T060 [US5] Implement handleAddColumn call to DynamicTable.AddColumn
-- [ ] T061 [US5] Implement handleAddColumn FlightInfo response with updated schema
-- [ ] T062 [US5] Add mockDynamicTable.AddColumn implementation in tests/integration/dynamic_catalog_test.go
-- [ ] T063 [US5] Add TestDDLAddColumn integration test in tests/integration/ddl_test.go
-- [ ] T064 [US5] Add TestDDLAddColumnAlreadyExists test case in tests/integration/ddl_test.go
+- [x] T056 [US5] Implement handleAddColumn in flight/doaction_ddl.go - decode msgpack params
+- [x] T057 [US5] Implement handleAddColumn table lookup and DynamicTable type assertion
+- [x] T058 [US5] Implement handleAddColumn column schema deserialization and validation (single field)
+- [x] T059 [US5] Implement handleAddColumn if_column_not_exists parameter handling
+- [x] T060 [US5] Implement handleAddColumn call to DynamicTable.AddColumn
+- [x] T061 [US5] Implement handleAddColumn FlightInfo response with updated schema
+- [x] T062 [US5] Add mockDynamicTable.AddColumn implementation in tests/integration/dynamic_catalog_test.go
+- [x] T063 [US5] Add TestDDLAddColumn integration test in tests/integration/ddl_test.go
+- [x] T064 [US5] Add TestDDLAddColumnAlreadyExists test case in tests/integration/ddl_test.go
 
 **Checkpoint**: User Story 5 complete - can modify table schema by adding columns
 
@@ -178,14 +178,14 @@ Based on plan.md project structure:
 
 ### Implementation for User Story 6
 
-- [ ] T065 [US6] Implement handleRemoveColumn in flight/doaction_ddl.go - decode msgpack params
-- [ ] T066 [US6] Implement handleRemoveColumn table lookup and DynamicTable type assertion
-- [ ] T067 [US6] Implement handleRemoveColumn if_column_exists and cascade parameter handling
-- [ ] T068 [US6] Implement handleRemoveColumn call to DynamicTable.RemoveColumn
-- [ ] T069 [US6] Implement handleRemoveColumn FlightInfo response with updated schema
-- [ ] T070 [US6] Add mockDynamicTable.RemoveColumn implementation in tests/integration/dynamic_catalog_test.go
-- [ ] T071 [US6] Add TestDDLRemoveColumn integration test in tests/integration/ddl_test.go
-- [ ] T072 [US6] Add TestDDLRemoveColumnNotFound test case in tests/integration/ddl_test.go
+- [x] T065 [US6] Implement handleRemoveColumn in flight/doaction_ddl.go - decode msgpack params
+- [x] T066 [US6] Implement handleRemoveColumn table lookup and DynamicTable type assertion
+- [x] T067 [US6] Implement handleRemoveColumn if_column_exists and cascade parameter handling
+- [x] T068 [US6] Implement handleRemoveColumn call to DynamicTable.RemoveColumn
+- [x] T069 [US6] Implement handleRemoveColumn FlightInfo response with updated schema
+- [x] T070 [US6] Add mockDynamicTable.RemoveColumn implementation in tests/integration/dynamic_catalog_test.go
+- [x] T071 [US6] Add TestDDLRemoveColumn integration test in tests/integration/ddl_test.go
+- [x] T072 [US6] Add TestDDLRemoveColumnNotFound test case in tests/integration/ddl_test.go
 
 **Checkpoint**: All user stories complete - full DDL lifecycle functional
 
@@ -195,13 +195,13 @@ Based on plan.md project structure:
 
 **Purpose**: Documentation, validation, and cleanup
 
-- [ ] T073 [P] Add godoc comments to all interfaces in catalog/dynamic.go
-- [ ] T074 [P] Add godoc comments to all handler functions in flight/doaction_ddl.go
-- [ ] T075 Run all tests with race detector: go test -race ./...
-- [ ] T076 [P] Run golangci-lint and fix any issues
-- [ ] T077 Add TestDDLFullLifecycle integration test (create schema, create table, add column, remove column, drop table, drop schema) in tests/integration/ddl_test.go
-- [ ] T078 Update roadmap.md to mark 003-ddl-operations as complete
-- [ ] T079 Update CLAUDE.md with DDL operations in recent changes section
+- [x] T073 [P] Add godoc comments to all interfaces in catalog/dynamic.go
+- [x] T074 [P] Add godoc comments to all handler functions in flight/doaction_ddl.go
+- [x] T075 Run all tests with race detector: go test -race ./...
+- [x] T076 [P] Run golangci-lint and fix any issues
+- [x] T077 Add TestDDLFullLifecycle integration test (create schema, create table, add column, remove column, drop table, drop schema) in tests/integration/ddl_test.go
+- [x] T078 Update roadmap.md to mark 003-ddl-operations as complete
+- [x] T079 Update CLAUDE.md with DDL operations in recent changes section
 
 ---
 
