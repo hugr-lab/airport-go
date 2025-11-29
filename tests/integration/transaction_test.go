@@ -105,11 +105,7 @@ func setupTransactionTestEnv(t *testing.T) *transactionTestEnv {
 	}
 
 	// Start server in background
-	go func() {
-		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
-			t.Logf("server error: %v", err)
-		}
-	}()
+	go server.Serve(listener)
 
 	// Create client
 	conn, err := grpc.NewClient(listener.Addr().String(),
@@ -329,11 +325,7 @@ func TestTransactionWithoutManager(t *testing.T) {
 	defer listener.Close()
 
 	// Start server in background
-	go func() {
-		if err := server.Serve(listener); err != nil && err != grpc.ErrServerStopped {
-			t.Logf("server error: %v", err)
-		}
-	}()
+	go server.Serve(listener)
 
 	// Create client
 	conn, err := grpc.NewClient(listener.Addr().String(),

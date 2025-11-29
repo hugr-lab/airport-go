@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -59,8 +60,8 @@ func TestTableColumnProjection(t *testing.T) {
 		}
 
 		// Verify scan was called
-		t.Logf("SelectAllColumns: scanCount=%d, requestedCols=%v", table.scanCount, table.requestedCols)
-		if table.scanCount == 0 {
+		t.Logf("SelectAllColumns: scanCount=%d, requestedCols=%v", table.GetScanCount(), table.GetRequestedCols())
+		if table.GetScanCount() == 0 {
 			t.Errorf("Scan was never called")
 		}
 	})
@@ -106,14 +107,14 @@ func TestTableColumnProjection(t *testing.T) {
 		}
 
 		// Verify column projection was passed to Scan
-		t.Logf("SelectSingleColumn: scanCount=%d, requestedCols=%v", table.scanCount, table.requestedCols)
-		if table.scanCount == 0 {
+		t.Logf("SelectSingleColumn: scanCount=%d, requestedCols=%v", table.GetScanCount(), table.GetRequestedCols())
+		if table.GetScanCount() == 0 {
 			t.Fatalf("Scan was never called")
 		}
 		// We expect only "name" column to be requested for projection pushdown
 		wantCols := []string{"name"}
-		if !slices.Equal(table.requestedCols, wantCols) {
-			t.Errorf("Column projection not working: got %v, want %v", table.requestedCols, wantCols)
+		if !slices.Equal(table.GetRequestedCols(), wantCols) {
+			t.Errorf("Column projection not working: got %v, want %v", table.GetRequestedCols(), wantCols)
 		}
 	})
 
@@ -154,14 +155,14 @@ func TestTableColumnProjection(t *testing.T) {
 		}
 
 		// Verify column projection was passed to Scan
-		t.Logf("SelectMultipleColumns: scanCount=%d, requestedCols=%v", table.scanCount, table.requestedCols)
-		if table.scanCount == 0 {
+		t.Logf("SelectMultipleColumns: scanCount=%d, requestedCols=%v", table.GetScanCount(), table.GetRequestedCols())
+		if table.GetScanCount() == 0 {
 			t.Fatalf("Scan was never called")
 		}
 		// We expect only "id" and "email" columns to be requested
 		wantCols := []string{"id", "email"}
-		if !slices.Equal(table.requestedCols, wantCols) {
-			t.Errorf("Column projection not working: got %v, want %v", table.requestedCols, wantCols)
+		if !slices.Equal(table.GetRequestedCols(), wantCols) {
+			t.Errorf("Column projection not working: got %v, want %v", table.GetRequestedCols(), wantCols)
 		}
 	})
 
@@ -322,10 +323,12 @@ func TestTableFunctionColumnProjection(t *testing.T) {
 
 // projectionTestTable tracks column requests for testing projection pushdown.
 type projectionTestTable struct {
-	schema          *arrow.Schema
-	data            [][]any
-	requestedCols   []string
-	scanCount       int
+	schema *arrow.Schema
+	data   [][]any
+
+	mu            sync.Mutex
+	requestedCols []string
+	scanCount     int
 }
 
 func newProjectionTestTable() *projectionTestTable {
@@ -346,8 +349,22 @@ func newProjectionTestTable() *projectionTestTable {
 }
 
 func (t *projectionTestTable) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.requestedCols = nil
 	t.scanCount = 0
+}
+
+func (t *projectionTestTable) GetScanCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.scanCount
+}
+
+func (t *projectionTestTable) GetRequestedCols() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.requestedCols
 }
 
 func (t *projectionTestTable) Name() string               { return "data" }
@@ -357,6 +374,7 @@ func (t *projectionTestTable) ArrowSchema(columns []string) *arrow.Schema {
 }
 
 func (t *projectionTestTable) Scan(_ context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+	t.mu.Lock()
 	t.scanCount++
 
 	// Track requested columns for test verification
@@ -365,6 +383,7 @@ func (t *projectionTestTable) Scan(_ context.Context, opts *catalog.ScanOptions)
 	} else {
 		t.requestedCols = []string{"*"}
 	}
+	t.mu.Unlock()
 
 	// Note: DuckDB expects full schema - it handles projection client-side.
 	// The column projection info is a hint for optimization (e.g., skip fetching
