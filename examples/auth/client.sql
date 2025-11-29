@@ -5,14 +5,20 @@
 INSTALL airport FROM community;
 LOAD airport;
 
--- Connect to the Airport server with bearer token authentication
-CREATE OR REPLACE SECRET airport_auth_secret (
-    TYPE AIRPORT,
-    auth_token 'secret-api-key',
-    scope 'grpc://localhost:50051'
+-- Create a persistent secret with auth_token scoped to the server URL
+-- DuckDB will automatically use this secret for matching scopes
+-- Valid tokens: secret-admin-token, secret-user1-token, secret-user2-token, secret-guest-token
+CREATE PERSISTENT SECRET airport_auth_secret (
+    TYPE airport,
+    auth_token 'secret-admin-token',
+    scope 'grpc://localhost:50052'
 );
 
-ATTACH '' AS airport_catalog (TYPE airport, SECRET airport_auth_secret, LOCATION 'grpc://localhost:50051');
+-- Attach the server (secret applies automatically via scope)
+ATTACH 'airport_catalog' AS airport_catalog (
+    TYPE AIRPORT,
+    location 'grpc://localhost:50052'
+);
 
 -- Query protected data using the authenticated connection
 SELECT * FROM airport_catalog.main.users;

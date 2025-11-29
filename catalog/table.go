@@ -91,3 +91,47 @@ type DeletableTable interface {
 	// Context may contain transaction ID for coordinated operations.
 	Delete(ctx context.Context, rowIDs []int64) (*DMLResult, error)
 }
+
+// ColumnStats contains statistics for a single table column.
+// All fields are nullable to support partial statistics reporting.
+// Implementations may return nil for any field they cannot compute.
+type ColumnStats struct {
+	// HasNotNull indicates whether the column contains non-null values.
+	HasNotNull *bool
+
+	// HasNull indicates whether the column contains null values.
+	HasNull *bool
+
+	// DistinctCount is the approximate or exact number of unique values.
+	DistinctCount *uint64
+
+	// Min is the minimum value in the column.
+	// Must be a Go type compatible with the column's Arrow type
+	// (e.g., int64 for Int64, string for String).
+	Min any
+
+	// Max is the maximum value in the column.
+	// Must be a Go type compatible with the column's Arrow type.
+	Max any
+
+	// MaxStringLength is the maximum string length (for string columns only).
+	MaxStringLength *uint64
+
+	// ContainsUnicode indicates whether strings contain unicode characters.
+	ContainsUnicode *bool
+}
+
+// StatisticsTable extends Table with column statistics capability.
+// Tables implement this interface to enable DuckDB query optimization
+// through the column_statistics action.
+// Implementations MUST be goroutine-safe.
+type StatisticsTable interface {
+	Table
+
+	// ColumnStatistics returns statistics for a specific column.
+	// columnName identifies the column to get statistics for.
+	// columnType is the DuckDB type name (e.g., "VARCHAR", "INTEGER").
+	// Returns ColumnStats with nil fields for unavailable statistics.
+	// Returns ErrNotFound if the column doesn't exist.
+	ColumnStatistics(ctx context.Context, columnName string, columnType string) (*ColumnStats, error)
+}

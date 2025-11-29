@@ -36,12 +36,19 @@
 
 Reference: <https://airport.query.farm/server_actions.html>
 
+### 004-column-statistics
+
+- [x] StatisticsTable interface in catalog/table.go
+- [x] ColumnStats struct with all 7 statistics fields
+- [x] column_statistics action handler in flight/doaction_statistics.go
+- [x] DuckDB type to Arrow type mapping
+- [x] Arrow IPC serialization for RecordBatch response
+- [x] can_produce_statistics metadata for tables
+- [x] Integration tests with DuckDB client
+
+Reference: <https://airport.query.farm/server_action_column_statistics.html>
+
 ## Future Features
-
-### column_statistics action
-
-- [ ] Implement column_statistics action
-- [ ] Integration tests
 
 ### Filter Pushdown
 

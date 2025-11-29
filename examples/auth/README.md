@@ -22,7 +22,7 @@ Start the authenticated Airport Flight server:
 go run main.go
 ```
 
-The server will start on `localhost:50051` with authentication enabled.
+The server will start on `localhost:50052` with authentication enabled.
 
 ## Testing with DuckDB Client
 
@@ -41,11 +41,18 @@ Or manually:
 INSTALL airport FROM community;
 LOAD airport;
 
--- Connect with bearer token
-CREATE SECRET airport_auth_secret (
+-- Create a persistent secret with auth_token
+-- Valid tokens: secret-admin-token, secret-user1-token, secret-user2-token, secret-guest-token
+CREATE PERSISTENT SECRET airport_auth_secret (
+    TYPE airport,
+    auth_token 'secret-admin-token',
+    scope 'grpc://localhost:50052'
+);
+
+-- Attach the server (secret applies automatically via scope)
+ATTACH 'airport_catalog' AS airport_catalog (
     TYPE AIRPORT,
-    uri 'grpc://localhost:50051',
-    bearer_token 'secret-api-key'
+    location 'grpc://localhost:50052'
 );
 
 -- Query protected data
@@ -54,16 +61,17 @@ SELECT * FROM airport_catalog.main.users;
 
 ### Without Authentication (Should Fail)
 
-Try connecting without a bearer token:
+Try connecting without a secret (no matching scope):
 
 ```sql
-CREATE SECRET airport_no_auth (
+-- Attach without authentication secret (different port, no secret)
+ATTACH 'no_auth_catalog' AS no_auth_catalog (
     TYPE AIRPORT,
-    uri 'grpc://localhost:50051'
+    location 'grpc://localhost:50053'
 );
 
--- This will fail with authentication error
-SELECT * FROM airport_catalog.main.users;
+-- This will fail with authentication error (assuming server is running)
+SELECT * FROM no_auth_catalog.main.users;
 ```
 
 Expected error:
@@ -74,8 +82,8 @@ Error: Authentication failed: missing or invalid bearer token
 ## Authentication Flow
 
 1. **Server**: Configured with `BearerAuth` validator function
-2. **Client**: Includes `bearer_token` in DuckDB connection secret
-3. **Request**: DuckDB sends token in Flight RPC metadata headers
+2. **Client**: Creates persistent secret with `auth_token` scoped to server URL
+3. **Request**: DuckDB automatically sends token for matching scopes
 4. **Validation**: Server validates token and extracts user identity
 5. **Authorization**: Server can use identity for access control
 
