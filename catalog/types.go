@@ -100,6 +100,35 @@ type FunctionSignature struct {
 // User implements this to connect to their data source.
 type ScanFunc func(ctx context.Context, opts *ScanOptions) (array.RecordReader, error)
 
+// DMLOptions carries options for DML operations (INSERT, UPDATE, DELETE).
+// Designed for extensibility - new fields can be added without breaking interfaces.
+type DMLOptions struct {
+	// Returning indicates whether a RETURNING clause was specified in the SQL statement.
+	// When true, the implementation should populate DMLResult.ReturningData.
+	// When false, no RETURNING data is expected (DMLResult.ReturningData should be nil).
+	Returning bool
+
+	// ReturningColumns specifies which columns to include in RETURNING results.
+	// Only meaningful when Returning is true.
+	//
+	// IMPORTANT: DuckDB Airport extension does NOT communicate which specific
+	// columns are in the RETURNING clause (e.g., "RETURNING id" vs "RETURNING *").
+	// The protocol only sends a boolean flag (return-chunks header).
+	//
+	// The server populates ReturningColumns with ALL table column names
+	// (excluding pseudo-columns like rowid) to indicate "return all columns".
+	// DuckDB handles column projection CLIENT-SIDE: the server returns all
+	// available columns, and DuckDB filters to only the requested columns.
+	//
+	// Semantics:
+	// - If Returning=false: ReturningColumns is ignored
+	// - If Returning=true: ReturningColumns contains all table column names
+	//
+	// Implementations can use ReturningColumns to know what data to return,
+	// or ignore it and return all columns (DuckDB filters client-side anyway).
+	ReturningColumns []string
+}
+
 // DMLResult holds the outcome of INSERT, UPDATE, or DELETE operations.
 // Returned by InsertableTable.Insert, UpdatableTable.Update, and DeletableTable.Delete.
 type DMLResult struct {

@@ -58,6 +58,12 @@ Reference: <https://airport.query.farm/server_action_column_statistics.html>
 - [x] Create a comprehensive documentation for protocol and package usage in the separate docs folder
 - [x] Go workspace configuration (go.work)
 
+### 006-returning-optimization
+
+- [ ] Investigate how to get returning column names from DuckDB (it seems that currently we return what we receive from DuckDB)
+- [ ] Provide the parameter with columns to be returned in RETURNING clause in DML table methods
+- [ ] Create integration tests to verify that only requested columns are returned in RETURNING clause, even if they are not provided in the incoming RecordBatch
+
 ## Future Features
 
 ### Filter Pushdown

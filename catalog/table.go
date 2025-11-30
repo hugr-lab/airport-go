@@ -60,10 +60,13 @@ type InsertableTable interface {
 
 	// Insert adds new rows to the table.
 	// The rows RecordReader provides batches of data to insert.
+	// The opts parameter provides options including RETURNING clause information:
+	//   - opts.Returning: true if RETURNING clause was specified
+	//   - opts.ReturningColumns: column names to include in RETURNING results
 	// Returns DMLResult with affected row count and optional returning data.
 	// Context may contain transaction ID for coordinated operations.
 	// Caller MUST call rows.Release() after Insert returns.
-	Insert(ctx context.Context, rows array.RecordReader) (*DMLResult, error)
+	Insert(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
 }
 
 // UpdatableTable extends Table with UPDATE capability.
@@ -75,9 +78,12 @@ type UpdatableTable interface {
 	// Update modifies existing rows identified by rowIDs.
 	// The rows RecordReader provides replacement data for matched rows.
 	// Row order in RecordReader must correspond to rowIDs order.
+	// The opts parameter provides options including RETURNING clause information:
+	//   - opts.Returning: true if RETURNING clause was specified
+	//   - opts.ReturningColumns: column names to include in RETURNING results
 	// Returns DMLResult with affected row count and optional returning data.
 	// Context may contain transaction ID for coordinated operations.
-	Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*DMLResult, error)
+	Update(ctx context.Context, rowIDs []int64, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
 }
 
 // DeletableTable extends Table with DELETE capability.
@@ -87,9 +93,12 @@ type DeletableTable interface {
 	Table
 
 	// Delete removes rows identified by rowIDs.
+	// The opts parameter provides options including RETURNING clause information:
+	//   - opts.Returning: true if RETURNING clause was specified
+	//   - opts.ReturningColumns: column names to include in RETURNING results
 	// Returns DMLResult with affected row count and optional returning data.
 	// Context may contain transaction ID for coordinated operations.
-	Delete(ctx context.Context, rowIDs []int64) (*DMLResult, error)
+	Delete(ctx context.Context, rowIDs []int64, opts *DMLOptions) (*DMLResult, error)
 }
 
 // ColumnStats contains statistics for a single table column.

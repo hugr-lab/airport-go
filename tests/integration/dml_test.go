@@ -242,6 +242,498 @@ func TestDMLInsertReturning(t *testing.T) {
 	})
 }
 
+// TestDMLInsertReturningColumns tests that DMLOptions.Returning and ReturningColumns
+// are correctly populated when INSERT with RETURNING clause is executed.
+// Also verifies that only the requested columns are returned in the result.
+func TestDMLInsertReturningColumns(t *testing.T) {
+	table := newDuckDBDMLTable(dmlSchemaWithRowID())
+	table.EnableReturning()
+	cat := duckDBDMLCatalog(t, table)
+	server := newTestServer(t, cat, nil)
+	defer server.stop()
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	attachName := connectToFlightServer(t, db, server.address, "")
+
+	t.Run("ReturningSingleColumn", func(t *testing.T) {
+		table.Clear()
+
+		// INSERT with only name and email (NO id), request RETURNING id
+		// This simulates auto-generated id - the table should generate id and return it
+		rows, err := db.Query(fmt.Sprintf(`
+			INSERT INTO %s.dml_schema.users (name, email)
+			SELECT 'user_' || i as name, 'user_' || i || '@example.com' as email
+			FROM generate_series(1, 3) as t(i)
+			RETURNING id
+		`, attachName))
+		if err != nil {
+			t.Fatalf("INSERT RETURNING failed: %v", err)
+		}
+
+		// Read returned values - should only have id column
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+		t.Logf("Returned columns: %v", cols)
+
+		// Verify only id column is returned
+		if len(cols) != 1 {
+			t.Errorf("expected 1 column returned, got %d: %v", len(cols), cols)
+		}
+		if len(cols) > 0 && cols[0] != "id" {
+			t.Errorf("expected column 'id', got '%s'", cols[0])
+		}
+
+		// Count returned rows and verify auto-generated id values
+		var returnedIDs []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			returnedIDs = append(returnedIDs, id)
+			t.Logf("Returned auto-generated id: %d", id)
+		}
+		rows.Close()
+
+		if len(returnedIDs) != 3 {
+			t.Errorf("expected 3 returned rows, got %d", len(returnedIDs))
+		}
+
+		// Verify auto-generated IDs are sequential (1, 2, 3)
+		for i, id := range returnedIDs {
+			expected := int64(i + 1)
+			if id != expected {
+				t.Errorf("expected auto-generated id %d at position %d, got %d", expected, i, id)
+			}
+		}
+
+		// Verify DMLOptions received by table
+		opts := table.GetLastInsertOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if !opts.Returning {
+			t.Errorf("expected Returning=true, got false")
+		}
+		// ReturningColumns should contain all table column names (excluding rowid)
+		// because DuckDB Airport extension doesn't communicate specific RETURNING columns.
+		// Server populates with all columns; DuckDB filters client-side.
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+
+		// Expect all table columns: id, name, email (not rowid)
+		expectedCols := []string{"id", "name", "email"}
+		if len(opts.ReturningColumns) != len(expectedCols) {
+			t.Errorf("expected ReturningColumns=%v, got %v", expectedCols, opts.ReturningColumns)
+		}
+	})
+
+	t.Run("ReturningAllColumns", func(t *testing.T) {
+		table.Clear()
+
+		// INSERT with only name and email (NO id), RETURNING * - should get all columns including auto-generated id
+		rows, err := db.Query(fmt.Sprintf(`
+			INSERT INTO %s.dml_schema.users (name, email)
+			VALUES ('alice', 'alice@example.com')
+			RETURNING *
+		`, attachName))
+		if err != nil {
+			t.Fatalf("INSERT RETURNING * failed: %v", err)
+		}
+
+		// Read returned columns - should have all table columns (id, name, email - not rowid)
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+		t.Logf("Returned columns for RETURNING *: %v", cols)
+
+		// RETURNING * should return all user-facing columns (id, name, email - not rowid)
+		if len(cols) < 3 {
+			t.Errorf("expected at least 3 columns for RETURNING *, got %d: %v", len(cols), cols)
+		}
+
+		// Read the first row and verify auto-generated id is returned
+		if !rows.Next() {
+			rows.Close()
+			t.Fatal("expected at least 1 returned row for RETURNING *")
+		}
+		// Scan all columns to verify they're present
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		t.Logf("RETURNING * row: %v", vals)
+		rows.Close()
+
+		// Verify DMLOptions
+		opts := table.GetLastInsertOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if !opts.Returning {
+			t.Errorf("expected Returning=true, got false")
+		}
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+	})
+
+	t.Run("ReturningFalse", func(t *testing.T) {
+		table.Clear()
+
+		// Execute INSERT without RETURNING - should set Returning=false
+		_, err := db.Exec(fmt.Sprintf(
+			"INSERT INTO %s.dml_schema.users (name, email) VALUES ('Bob', 'bob@example.com')",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("INSERT failed: %v", err)
+		}
+
+		// Verify DMLOptions received by table
+		opts := table.GetLastInsertOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if opts.Returning {
+			t.Errorf("expected Returning=false, got true")
+		}
+		if len(opts.ReturningColumns) != 0 {
+			t.Errorf("expected ReturningColumns to be empty when Returning=false, got %v", opts.ReturningColumns)
+		}
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+	})
+}
+
+// TestDMLUpdateReturningColumns tests that DMLOptions.Returning and ReturningColumns
+// are correctly populated when UPDATE with RETURNING clause is executed.
+// Also verifies that only the requested columns are returned in the result.
+func TestDMLUpdateReturningColumns(t *testing.T) {
+	table := newDuckDBDMLTable(dmlSchemaWithRowID())
+	table.EnableReturning()
+	cat := duckDBDMLCatalog(t, table)
+	server := newTestServer(t, cat, nil)
+	defer server.stop()
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	attachName := connectToFlightServer(t, db, server.address, "")
+
+	t.Run("ReturningSingleColumn", func(t *testing.T) {
+		table.Clear()
+		table.SeedData([][]any{
+			{int64(1), int64(1), "Alice", "alice@example.com"},
+			{int64(2), int64(2), "Bob", "bob@example.com"},
+		})
+
+		// UPDATE and request RETURNING id - should only get id column back
+		rows, err := db.Query(fmt.Sprintf(
+			"UPDATE %s.dml_schema.users SET name = 'Updated' WHERE id IN (1, 2) RETURNING id",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("UPDATE RETURNING failed: %v", err)
+		}
+
+		// Read returned columns - should only have id column
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+		t.Logf("Returned columns: %v", cols)
+
+		// Verify only id column is returned
+		if len(cols) != 1 {
+			t.Errorf("expected 1 column returned, got %d: %v", len(cols), cols)
+		}
+		if len(cols) > 0 && cols[0] != "id" {
+			t.Errorf("expected column 'id', got '%s'", cols[0])
+		}
+
+		// Count returned rows
+		var returnedCount int
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			returnedCount++
+		}
+		rows.Close()
+
+		if returnedCount != 2 {
+			t.Errorf("expected 2 returned rows, got %d", returnedCount)
+		}
+
+		// Verify DMLOptions received by table
+		opts := table.GetLastUpdateOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if !opts.Returning {
+			t.Errorf("expected Returning=true, got false")
+		}
+		// ReturningColumns should contain all table column names (excluding rowid)
+		// because DuckDB Airport extension doesn't communicate specific RETURNING columns.
+		// Server populates with all columns; DuckDB filters client-side.
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+
+		// Expect all table columns: id, name, email (not rowid)
+		expectedCols := []string{"id", "name", "email"}
+		if len(opts.ReturningColumns) != len(expectedCols) {
+			t.Errorf("expected ReturningColumns=%v, got %v", expectedCols, opts.ReturningColumns)
+		}
+	})
+
+	t.Run("ReturningAllColumns", func(t *testing.T) {
+		table.Clear()
+		table.SeedData([][]any{
+			{int64(1), int64(1), "Alice", "alice@example.com"},
+		})
+
+		// UPDATE and RETURNING * - should get all columns back
+		rows, err := db.Query(fmt.Sprintf(
+			"UPDATE %s.dml_schema.users SET name = 'Alice Updated' WHERE id = 1 RETURNING *",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("UPDATE RETURNING * failed: %v", err)
+		}
+
+		// Read returned columns - should have all table columns
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+		t.Logf("Returned columns for RETURNING *: %v", cols)
+
+		// RETURNING * should return all table columns
+		if len(cols) < 3 {
+			t.Errorf("expected at least 3 columns for RETURNING *, got %d: %v", len(cols), cols)
+		}
+
+		// Read at least one row
+		var hasRow bool
+		for rows.Next() {
+			hasRow = true
+			break
+		}
+		rows.Close()
+
+		if !hasRow {
+			t.Errorf("expected at least 1 returned row for RETURNING *")
+		}
+
+		// Verify DMLOptions
+		opts := table.GetLastUpdateOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if !opts.Returning {
+			t.Errorf("expected Returning=true, got false")
+		}
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+	})
+
+	t.Run("ReturningFalse", func(t *testing.T) {
+		table.Clear()
+		table.SeedData([][]any{
+			{int64(1), int64(1), "Alice", "alice@example.com"},
+		})
+
+		// Execute UPDATE without RETURNING
+		_, err := db.Exec(fmt.Sprintf(
+			"UPDATE %s.dml_schema.users SET name = 'Alice Updated' WHERE id = 1",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("UPDATE failed: %v", err)
+		}
+
+		// Verify DMLOptions received by table
+		opts := table.GetLastUpdateOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if opts.Returning {
+			t.Errorf("expected Returning=false, got true")
+		}
+		if len(opts.ReturningColumns) != 0 {
+			t.Errorf("expected ReturningColumns to be empty when Returning=false, got %v", opts.ReturningColumns)
+		}
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+	})
+}
+
+// TestDMLDeleteReturningColumns tests that DMLOptions.Returning and ReturningColumns
+// are correctly populated when DELETE with RETURNING clause is executed.
+// Also verifies that only the requested columns are returned in the result.
+func TestDMLDeleteReturningColumns(t *testing.T) {
+	table := newDuckDBDMLTable(dmlSchemaWithRowID())
+	table.EnableReturning()
+	cat := duckDBDMLCatalog(t, table)
+	server := newTestServer(t, cat, nil)
+	defer server.stop()
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	attachName := connectToFlightServer(t, db, server.address, "")
+
+	t.Run("ReturningSingleColumn", func(t *testing.T) {
+		table.Clear()
+		table.SeedData([][]any{
+			{int64(1), int64(1), "Alice", "alice@example.com"},
+			{int64(2), int64(2), "Bob", "bob@example.com"},
+			{int64(3), int64(3), "Charlie", "charlie@example.com"},
+		})
+
+		// DELETE and request RETURNING id - should only get id column back
+		rows, err := db.Query(fmt.Sprintf(
+			"DELETE FROM %s.dml_schema.users WHERE id IN (1, 2) RETURNING id",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("DELETE RETURNING failed: %v", err)
+		}
+
+		// Read returned columns - should only have id column
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+		t.Logf("Returned columns: %v", cols)
+
+		// Verify only id column is returned
+		if len(cols) != 1 {
+			t.Errorf("expected 1 column returned, got %d: %v", len(cols), cols)
+		}
+		if len(cols) > 0 && cols[0] != "id" {
+			t.Errorf("expected column 'id', got '%s'", cols[0])
+		}
+
+		// Count returned rows
+		var returnedCount int
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("Scan failed: %v", err)
+			}
+			returnedCount++
+		}
+		rows.Close()
+
+		if returnedCount != 2 {
+			t.Errorf("expected 2 returned rows, got %d", returnedCount)
+		}
+
+		// Verify DMLOptions received by table
+		opts := table.GetLastDeleteOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if !opts.Returning {
+			t.Errorf("expected Returning=true, got false")
+		}
+		// ReturningColumns should contain all table column names (excluding rowid)
+		// because DuckDB Airport extension doesn't communicate specific RETURNING columns.
+		// Server populates with all columns; DuckDB filters client-side.
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+
+		// Expect all table columns: id, name, email (not rowid)
+		expectedCols := []string{"id", "name", "email"}
+		if len(opts.ReturningColumns) != len(expectedCols) {
+			t.Errorf("expected ReturningColumns=%v, got %v", expectedCols, opts.ReturningColumns)
+		}
+	})
+
+	t.Run("ReturningAllColumns", func(t *testing.T) {
+		table.Clear()
+		table.SeedData([][]any{
+			{int64(1), int64(1), "Alice", "alice@example.com"},
+		})
+
+		// DELETE and RETURNING * - should get all columns back
+		rows, err := db.Query(fmt.Sprintf(
+			"DELETE FROM %s.dml_schema.users WHERE id = 1 RETURNING *",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("DELETE RETURNING * failed: %v", err)
+		}
+
+		// Read returned columns - should have all table columns
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to get columns: %v", err)
+		}
+		t.Logf("Returned columns for RETURNING *: %v", cols)
+
+		// RETURNING * should return all table columns
+		if len(cols) < 3 {
+			t.Errorf("expected at least 3 columns for RETURNING *, got %d: %v", len(cols), cols)
+		}
+
+		// Read at least one row
+		var hasRow bool
+		for rows.Next() {
+			hasRow = true
+			break
+		}
+		rows.Close()
+
+		if !hasRow {
+			t.Errorf("expected at least 1 returned row for RETURNING *")
+		}
+
+		// Verify DMLOptions
+		opts := table.GetLastDeleteOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if !opts.Returning {
+			t.Errorf("expected Returning=true, got false")
+		}
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+	})
+
+	t.Run("ReturningFalse", func(t *testing.T) {
+		table.Clear()
+		table.SeedData([][]any{
+			{int64(1), int64(1), "Alice", "alice@example.com"},
+		})
+
+		// Execute DELETE without RETURNING
+		_, err := db.Exec(fmt.Sprintf(
+			"DELETE FROM %s.dml_schema.users WHERE id = 1",
+			attachName,
+		))
+		if err != nil {
+			t.Fatalf("DELETE failed: %v", err)
+		}
+
+		// Verify DMLOptions received by table
+		opts := table.GetLastDeleteOpts()
+		if opts == nil {
+			t.Fatal("expected DMLOptions to be non-nil")
+		}
+		if opts.Returning {
+			t.Errorf("expected Returning=false, got true")
+		}
+		if len(opts.ReturningColumns) != 0 {
+			t.Errorf("expected ReturningColumns to be empty when Returning=false, got %v", opts.ReturningColumns)
+		}
+		t.Logf("DMLOptions: Returning=%v, ReturningColumns=%v", opts.Returning, opts.ReturningColumns)
+	})
+}
+
 // TestDMLUpdate tests UPDATE operations using DuckDB SQL.
 func TestDMLUpdate(t *testing.T) {
 	table := newDuckDBDMLTable(dmlSchemaWithRowID())
@@ -908,13 +1400,15 @@ func TestDMLMergeInsertDelete(t *testing.T) {
 
 // dmlSchemaWithRowID creates a schema with rowid pseudocolumn for DML operations.
 // The rowid column has is_rowid metadata which enables UPDATE/DELETE via DuckDB.
+// Note: All fields are marked as nullable to match DuckDB's input schema for RETURNING.
+// DuckDB sends all columns as nullable when executing DML operations with RETURNING.
 func dmlSchemaWithRowID() *arrow.Schema {
 	rowidMeta := arrow.NewMetadata([]string{"is_rowid"}, []string{"true"})
 	return arrow.NewSchema([]arrow.Field{
-		{Name: "rowid", Type: arrow.PrimitiveTypes.Int64, Nullable: false, Metadata: rowidMeta},
-		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
-		{Name: "name", Type: arrow.BinaryTypes.String, Nullable: false},
-		{Name: "email", Type: arrow.BinaryTypes.String, Nullable: false},
+		{Name: "rowid", Type: arrow.PrimitiveTypes.Int64, Nullable: true, Metadata: rowidMeta},
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: true},
+		{Name: "name", Type: arrow.BinaryTypes.String, Nullable: true},
+		{Name: "email", Type: arrow.BinaryTypes.String, Nullable: true},
 	}, nil)
 }
 
@@ -928,6 +1422,11 @@ type duckDBDMLTable struct {
 	data            [][]any // Each row: [rowid, id, name, email]
 	nextRowID       int64
 	enableReturning bool // When true, DML operations return affected rows
+
+	// Track last received DMLOptions for testing
+	lastInsertOpts *catalog.DMLOptions
+	lastUpdateOpts *catalog.DMLOptions
+	lastDeleteOpts *catalog.DMLOptions
 }
 
 func newDuckDBDMLTable(schema *arrow.Schema) *duckDBDMLTable {
@@ -974,10 +1473,13 @@ func (t *duckDBDMLTable) convertData() [][]interface{} {
 	return result
 }
 
-func (t *duckDBDMLTable) Insert(ctx context.Context, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *duckDBDMLTable) Insert(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	start := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Track received DMLOptions for testing
+	t.lastInsertOpts = opts
 
 	inputSchema := rows.Schema()
 	var insertedRows [][]any // For RETURNING support
@@ -989,12 +1491,19 @@ func (t *duckDBDMLTable) Insert(ctx context.Context, rows array.RecordReader) (*
 		batchCount++
 		for rowIdx := int64(0); rowIdx < batch.NumRows(); rowIdx++ {
 			// Assign rowid and extract other values
+			// Row format: [rowid, col1, col2, ...] where cols come from input in order
 			row := make([]any, batch.NumCols()+1)
 			row[0] = t.nextRowID // rowid
 
 			for colIdx := 0; colIdx < int(batch.NumCols()); colIdx++ {
 				col := batch.Column(colIdx)
-				row[colIdx+1] = extractValue(col, int(rowIdx))
+				val := extractValue(col, int(rowIdx))
+				// If column is 'id' and value is nil, auto-generate
+				if val == nil && inputSchema.Field(colIdx).Name == "id" {
+					row[colIdx+1] = t.nextRowID // auto-generate id
+				} else {
+					row[colIdx+1] = val
+				}
 			}
 			t.data = append(t.data, row)
 
@@ -1018,23 +1527,28 @@ func (t *duckDBDMLTable) Insert(ctx context.Context, rows array.RecordReader) (*
 
 	result := &catalog.DMLResult{AffectedRows: totalRows}
 
-	// Build RETURNING data if enabled
-	if t.enableReturning && len(insertedRows) > 0 {
-		returningReader, err := t.buildReturningReader(inputSchema, insertedRows)
+	// Build RETURNING data if enabled and opts.Returning is true
+	// Use opts.ReturningColumns to determine which columns to return
+	if t.enableReturning && opts != nil && opts.Returning && len(insertedRows) > 0 {
+		// Project schema to ReturningColumns (for now, same as all columns)
+		returningSchema := catalog.ProjectSchema(t.schema, opts.ReturningColumns)
+		returningReader, err := t.buildReturningReader(returningSchema, insertedRows)
 		if err != nil {
-			fmt.Printf("[DEBUG] Failed to build RETURNING reader: %v\n", err)
-		} else {
-			result.ReturningData = returningReader
+			return nil, fmt.Errorf("failed to build RETURNING data: %w", err)
 		}
+		result.ReturningData = returningReader
 	}
 
 	return result, nil
 }
 
-func (t *duckDBDMLTable) Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *duckDBDMLTable) Update(ctx context.Context, rowIDs []int64, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	start := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Track received DMLOptions for testing
+	t.lastUpdateOpts = opts
 
 	// Get the input schema to map column names to table positions
 	// DuckDB sends only the columns being updated, not all columns
@@ -1093,14 +1607,21 @@ func (t *duckDBDMLTable) Update(ctx context.Context, rowIDs []int64, rows array.
 		return nil, err
 	}
 
-	// Apply updates
+	// Apply updates and collect affected rows for RETURNING
 	affected := int64(0)
+	var affectedRows [][]any
 	for i := range t.data {
 		rowID := t.data[i][0].(int64)
 		if colUpdates, ok := updates[rowID]; ok {
 			// Apply each column update at the correct position
 			for _, cu := range colUpdates {
 				t.data[i][cu.colIdx] = cu.value
+			}
+			// Store affected row for RETURNING
+			if t.enableReturning && opts != nil && opts.Returning {
+				rowCopy := make([]any, len(t.data[i]))
+				copy(rowCopy, t.data[i])
+				affectedRows = append(affectedRows, rowCopy)
 			}
 			affected++
 		}
@@ -1110,13 +1631,33 @@ func (t *duckDBDMLTable) Update(ctx context.Context, rowIDs []int64, rows array.
 	fmt.Printf("[DEBUG] UPDATE completed: %d rows affected in %d batches, duration=%v\n",
 		affected, batchCount, elapsed)
 
-	return &catalog.DMLResult{AffectedRows: affected}, nil
+	result := &catalog.DMLResult{AffectedRows: affected}
+
+	// Build RETURNING data if enabled and opts.Returning is true
+	// Use opts.ReturningColumns to determine which columns to return
+	if t.enableReturning && opts != nil && opts.Returning && len(affectedRows) > 0 {
+		fmt.Printf("[DEBUG] Building UPDATE RETURNING data for %d rows\n", len(affectedRows))
+		// Project schema to ReturningColumns (for now, same as all columns)
+		returningSchema := catalog.ProjectSchema(t.schema, opts.ReturningColumns)
+		fmt.Printf("[DEBUG] RETURNING schema: %v\n", returningSchema.String())
+		returningReader, err := t.buildReturningReader(returningSchema, affectedRows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build RETURNING data: %w", err)
+		}
+		fmt.Printf("[DEBUG] UPDATE RETURNING reader built successfully\n")
+		result.ReturningData = returningReader
+	}
+
+	return result, nil
 }
 
-func (t *duckDBDMLTable) Delete(ctx context.Context, rowIDs []int64) (*catalog.DMLResult, error) {
+func (t *duckDBDMLTable) Delete(ctx context.Context, rowIDs []int64, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	start := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Track received DMLOptions for testing
+	t.lastDeleteOpts = opts
 
 	// Build set of rowIDs to delete
 	deleteSet := make(map[int64]bool)
@@ -1124,14 +1665,21 @@ func (t *duckDBDMLTable) Delete(ctx context.Context, rowIDs []int64) (*catalog.D
 		deleteSet[id] = true
 	}
 
-	// Filter out deleted rows
+	// Filter out deleted rows and collect them for RETURNING
 	newData := make([][]any, 0, len(t.data))
+	var deletedRows [][]any
 	deleted := int64(0)
 	for _, row := range t.data {
 		rowID := row[0].(int64)
 		if !deleteSet[rowID] {
 			newData = append(newData, row)
 		} else {
+			// Store deleted row for RETURNING
+			if t.enableReturning && opts != nil && opts.Returning {
+				rowCopy := make([]any, len(row))
+				copy(rowCopy, row)
+				deletedRows = append(deletedRows, rowCopy)
+			}
 			deleted++
 		}
 	}
@@ -1141,7 +1689,21 @@ func (t *duckDBDMLTable) Delete(ctx context.Context, rowIDs []int64) (*catalog.D
 	fmt.Printf("[DEBUG] DELETE completed: %d rows deleted, duration=%v\n",
 		deleted, elapsed)
 
-	return &catalog.DMLResult{AffectedRows: deleted}, nil
+	result := &catalog.DMLResult{AffectedRows: deleted}
+
+	// Build RETURNING data if enabled and opts.Returning is true
+	// Use opts.ReturningColumns to determine which columns to return
+	if t.enableReturning && opts != nil && opts.Returning && len(deletedRows) > 0 {
+		// Project schema to ReturningColumns (for now, same as all columns)
+		returningSchema := catalog.ProjectSchema(t.schema, opts.ReturningColumns)
+		returningReader, err := t.buildReturningReader(returningSchema, deletedRows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build RETURNING data: %w", err)
+		}
+		result.ReturningData = returningReader
+	}
+
+	return result, nil
 }
 
 func (t *duckDBDMLTable) Clear() {
@@ -1178,6 +1740,27 @@ func (t *duckDBDMLTable) GetData() [][]any {
 	result := make([][]any, len(t.data))
 	copy(result, t.data)
 	return result
+}
+
+// GetLastInsertOpts returns the last DMLOptions received by Insert.
+func (t *duckDBDMLTable) GetLastInsertOpts() *catalog.DMLOptions {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastInsertOpts
+}
+
+// GetLastUpdateOpts returns the last DMLOptions received by Update.
+func (t *duckDBDMLTable) GetLastUpdateOpts() *catalog.DMLOptions {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastUpdateOpts
+}
+
+// GetLastDeleteOpts returns the last DMLOptions received by Delete.
+func (t *duckDBDMLTable) GetLastDeleteOpts() *catalog.DMLOptions {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lastDeleteOpts
 }
 
 // buildReturningReader builds a RecordReader from affected rows for RETURNING clause.

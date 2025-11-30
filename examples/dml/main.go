@@ -261,13 +261,18 @@ func (t *UsersTable) Scan(_ context.Context, _ *catalog.ScanOptions) (array.Reco
 
 // InsertableTable interface implementation
 
-func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Check if running in transaction context
 	if txID, ok := catalog.TransactionIDFromContext(ctx); ok {
 		fmt.Printf("[UsersTable] INSERT in transaction %s\n", txID[:8])
+	}
+
+	// Log RETURNING info if requested
+	if opts != nil && opts.Returning {
+		fmt.Printf("[UsersTable] INSERT with RETURNING requested, columns: %v\n", opts.ReturningColumns)
 	}
 
 	var totalRows int64
@@ -301,13 +306,18 @@ func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader) (*cata
 
 // UpdatableTable interface implementation
 
-func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Check if running in transaction context
 	if txID, ok := catalog.TransactionIDFromContext(ctx); ok {
 		fmt.Printf("[UsersTable] UPDATE in transaction %s\n", txID[:8])
+	}
+
+	// Log RETURNING info if requested
+	if opts != nil && opts.Returning {
+		fmt.Printf("[UsersTable] UPDATE with RETURNING requested, columns: %v\n", opts.ReturningColumns)
 	}
 
 	// Build rowid to index mapping
@@ -358,13 +368,18 @@ func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.Reco
 
 // DeletableTable interface implementation
 
-func (t *UsersTable) Delete(ctx context.Context, rowIDs []int64) (*catalog.DMLResult, error) {
+func (t *UsersTable) Delete(ctx context.Context, rowIDs []int64, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Check if running in transaction context
 	if txID, ok := catalog.TransactionIDFromContext(ctx); ok {
 		fmt.Printf("[UsersTable] DELETE in transaction %s\n", txID[:8])
+	}
+
+	// Log RETURNING info if requested
+	if opts != nil && opts.Returning {
+		fmt.Printf("[UsersTable] DELETE with RETURNING requested, columns: %v\n", opts.ReturningColumns)
 	}
 
 	// Build set of rowids to delete
