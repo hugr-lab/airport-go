@@ -9,6 +9,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -106,6 +107,18 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 	// Track results across pipeline
 	var totalRows int64
 
+	// Create DMLOptions with RETURNING information
+	// Note: DuckDB Airport extension does not communicate which specific columns
+	// are in the RETURNING clause. When RETURNING is requested, we populate
+	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
+	// DuckDB handles column projection client-side after receiving server response.
+	opts := &catalog.DMLOptions{
+		Returning: returnData,
+	}
+	if returnData {
+		opts.ReturningColumns = getTableColumnNames(table)
+	}
+
 	// Error group for managing goroutines
 	eg, egCtx := errgroup.WithContext(ctx)
 
@@ -156,7 +169,7 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 			var dmlResult *catalog.DMLResult
 			insertErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
 				var err error
-				dmlResult, err = insertableTable.Insert(txCtx, batchReader)
+				dmlResult, err = insertableTable.Insert(txCtx, batchReader, opts)
 				return err
 			})
 
@@ -278,16 +291,6 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		"input_schema", inputSchema,
 	)
 
-	// Create a writer to send output schema (required for bidirectional exchange)
-	writer := NewSchemaWriter(stream, inputSchema, s.allocator)
-	defer writer.Close()
-
-	// Send schema to client to acknowledge and enable bidirectional data flow
-	if err := writer.Begin(); err != nil {
-		inputReader.Release()
-		return status.Errorf(codes.Internal, "failed to send output schema: %v", err)
-	}
-
 	// Find the rowid column in the input schema
 	rowidColIdx := -1
 	for i := 0; i < inputSchema.NumFields(); i++ {
@@ -309,12 +312,35 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		return status.Errorf(codes.InvalidArgument, "UPDATE requires rowid column in input schema")
 	}
 
+	// Create a writer to send output schema (required for bidirectional exchange)
+	// Use inputSchema because DuckDB expects the output schema to match input for UPDATE
+	writer := NewSchemaWriter(stream, inputSchema, s.allocator)
+	defer writer.Close()
+
+	// Send schema to client to acknowledge and enable bidirectional data flow
+	if err := writer.Begin(); err != nil {
+		inputReader.Release()
+		return status.Errorf(codes.Internal, "failed to send output schema: %v", err)
+	}
+
 	// Pipeline channels for bidirectional streaming
 	inputCh := make(chan arrow.RecordBatch, 1)
 	outputCh := make(chan arrow.RecordBatch, 1)
 
 	// Track results across pipeline
 	var totalRows int64
+
+	// Create DMLOptions with RETURNING information
+	// Note: DuckDB Airport extension does not communicate which specific columns
+	// are in the RETURNING clause. When RETURNING is requested, we populate
+	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
+	// DuckDB handles column projection client-side after receiving server response.
+	opts := &catalog.DMLOptions{
+		Returning: returnData,
+	}
+	if returnData {
+		opts.ReturningColumns = getTableColumnNames(table)
+	}
 
 	// Error group for managing goroutines
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -345,13 +371,12 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		}
 	}()
 
-	// Processor goroutine: updates data and produces RETURNING batches
+	// Processor goroutine: updates data per-batch and produces RETURNING batches
+	// This processes incrementally to avoid deadlock - each batch is updated
+	// and RETURNING data is sent before waiting for more input
 	eg.Go(func() error {
 		defer close(outputCh)
 
-		// Collect batches and extract rowids
-		var records []arrow.RecordBatch
-		var rowIDs []int64
 		for batch := range inputCh {
 			totalRows += batch.NumRows()
 
@@ -360,89 +385,97 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 			rowIDsFromBatch, err := extractRowIDs(rowidCol)
 			if err != nil {
 				batch.Release()
-				for _, r := range records {
+				return err
+			}
+
+			// Strip rowid column from batch to create data record
+			dataRecords := stripRowIDColumn([]arrow.RecordBatch{batch}, rowidColIdx)
+			batch.Release()
+
+			if len(dataRecords) == 0 {
+				continue
+			}
+
+			// Create RecordReader for this single batch
+			recordReader, err := array.NewRecordReader(dataRecords[0].Schema(), dataRecords)
+			if err != nil {
+				for _, r := range dataRecords {
 					r.Release()
 				}
 				return err
 			}
-			rowIDs = append(rowIDs, rowIDsFromBatch...)
-			records = append(records, batch)
-		}
 
-		if len(records) == 0 {
-			return nil
-		}
+			// Execute UPDATE for this batch with transaction handling
+			var dmlResult *catalog.DMLResult
+			updateErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
+				var err error
+				dmlResult, err = updatableTable.Update(txCtx, rowIDsFromBatch, recordReader, opts)
+				return err
+			})
 
-		// Create RecordReader from collected batches (without rowid column)
-		dataRecords := stripRowIDColumn(records, rowidColIdx)
-
-		// Release original records
-		for _, r := range records {
-			r.Release()
-		}
-
-		if len(dataRecords) == 0 {
-			return nil
-		}
-
-		recordReader, err := array.NewRecordReader(dataRecords[0].Schema(), dataRecords)
-		if err != nil {
+			// Release data records after update
 			for _, r := range dataRecords {
 				r.Release()
 			}
-			return err
-		}
 
-		// Execute UPDATE with transaction handling
-		var dmlResult *catalog.DMLResult
-		updateErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
-			var err error
-			dmlResult, err = updatableTable.Update(txCtx, rowIDs, recordReader)
-			return err
-		})
+			if updateErr != nil {
+				return updateErr
+			}
 
-		// Release data records after update
-		for _, r := range dataRecords {
-			r.Release()
-		}
+			// Send RETURNING data through output channel if requested
+			if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
+				s.logger.Debug("Processing UPDATE RETURNING data")
+				for dmlResult.ReturningData.Next() {
+					outBatch := dmlResult.ReturningData.RecordBatch()
+					s.logger.Debug("Sending UPDATE RETURNING batch to channel",
+						"rows", outBatch.NumRows(),
+					)
+					outBatch.Retain()
 
-		if updateErr != nil {
-			return updateErr
-		}
-
-		// Send RETURNING data through output channel if requested
-		if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
-			for dmlResult.ReturningData.Next() {
-				outBatch := dmlResult.ReturningData.RecordBatch()
-				outBatch.Retain()
-
-				select {
-				case outputCh <- outBatch:
-				case <-egCtx.Done():
-					outBatch.Release()
-					return egCtx.Err()
+					select {
+					case outputCh <- outBatch:
+						s.logger.Debug("Sent UPDATE RETURNING batch to channel")
+					case <-egCtx.Done():
+						outBatch.Release()
+						return egCtx.Err()
+					}
 				}
+				if err := dmlResult.ReturningData.Err(); err != nil {
+					s.logger.Error("RETURNING data reader error", "error", err)
+					return err
+				}
+				s.logger.Debug("Finished processing UPDATE RETURNING data")
 			}
-			if err := dmlResult.ReturningData.Err(); err != nil {
-				return err
-			}
+			s.logger.Debug("UPDATE batch processing complete, waiting for next batch")
 		}
 
+		s.logger.Debug("UPDATE processor completed")
 		return nil
 	})
 
 	// Writer goroutine: sends RETURNING batches back to client
 	eg.Go(func() error {
 		for batch := range outputCh {
-			if err := writer.Write(batch); err != nil {
-				batch.Release()
+			s.logger.Debug("Writing UPDATE RETURNING batch to stream",
+				"rows", batch.NumRows(),
+			)
+			// Transform batch to match writer's expected schema (inputSchema)
+			// The table may return data with slightly different schema (e.g., without rowid)
+			transformedBatch := transformBatchSchema(batch, inputSchema, s.allocator)
+			if transformedBatch != batch {
+				batch.Release() // Release original if transformed
+			}
+			if err := writer.Write(transformedBatch); err != nil {
+				s.logger.Error("Failed to write UPDATE RETURNING batch", "error", err)
+				transformedBatch.Release()
 				return err
 			}
 			s.logger.Debug("Sent UPDATE RETURNING batch",
-				"rows", batch.NumRows(),
+				"rows", transformedBatch.NumRows(),
 			)
-			batch.Release()
+			transformedBatch.Release()
 		}
+		s.logger.Debug("Writer goroutine completed")
 		return nil
 	})
 
@@ -521,8 +554,17 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		"input_schema", inputSchema,
 	)
 
+	// For DELETE with RETURNING, we need to use the table's schema for output
+	// because inputSchema only contains rowid, but client expects full table data
+	var outputSchema *arrow.Schema
+	if returnData {
+		outputSchema = table.ArrowSchema(nil) // Get full table schema
+	} else {
+		outputSchema = inputSchema
+	}
+
 	// Create a writer to send output schema (required for bidirectional exchange)
-	writer := NewSchemaWriter(stream, inputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
 	defer writer.Close()
 
 	// Send schema to client to acknowledge and enable bidirectional data flow
@@ -537,6 +579,18 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 
 	// Track results across pipeline
 	var totalRows int64
+
+	// Create DMLOptions with RETURNING information
+	// Note: DuckDB Airport extension does not communicate which specific columns
+	// are in the RETURNING clause. When RETURNING is requested, we populate
+	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
+	// DuckDB handles column projection client-side after receiving server response.
+	opts := &catalog.DMLOptions{
+		Returning: returnData,
+	}
+	if returnData {
+		opts.ReturningColumns = getTableColumnNames(table)
+	}
 
 	// Error group for managing goroutines
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -567,59 +621,60 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		}
 	}()
 
-	// Processor goroutine: deletes data and produces RETURNING batches
+	// Processor goroutine: deletes data per-batch and produces RETURNING batches
+	// This processes incrementally to avoid deadlock - each batch is deleted
+	// and RETURNING data is sent before waiting for more input
 	eg.Go(func() error {
 		defer close(outputCh)
 
-		// Collect rowids from all batches
-		var rowIDs []int64
 		for batch := range inputCh {
 			totalRows += batch.NumRows()
 
-			if batch.NumCols() > 0 {
-				// The first column should be rowid
-				rowidCol := batch.Column(0)
-				rowIDsFromBatch, err := extractRowIDs(rowidCol)
-				if err != nil {
-					batch.Release()
+			if batch.NumCols() == 0 {
+				batch.Release()
+				continue
+			}
+
+			// The first column should be rowid
+			rowidCol := batch.Column(0)
+			rowIDsFromBatch, err := extractRowIDs(rowidCol)
+			batch.Release()
+			if err != nil {
+				return err
+			}
+
+			if len(rowIDsFromBatch) == 0 {
+				continue
+			}
+
+			// Execute DELETE for this batch with transaction handling
+			var dmlResult *catalog.DMLResult
+			deleteErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
+				var err error
+				dmlResult, err = deletableTable.Delete(txCtx, rowIDsFromBatch, opts)
+				return err
+			})
+
+			if deleteErr != nil {
+				return deleteErr
+			}
+
+			// Send RETURNING data through output channel if requested
+			if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
+				for dmlResult.ReturningData.Next() {
+					outBatch := dmlResult.ReturningData.RecordBatch()
+					outBatch.Retain()
+
+					select {
+					case outputCh <- outBatch:
+					case <-egCtx.Done():
+						outBatch.Release()
+						return egCtx.Err()
+					}
+				}
+				if err := dmlResult.ReturningData.Err(); err != nil {
 					return err
 				}
-				rowIDs = append(rowIDs, rowIDsFromBatch...)
-			}
-			batch.Release()
-		}
-
-		if len(rowIDs) == 0 {
-			return nil
-		}
-
-		// Execute DELETE with transaction handling
-		var dmlResult *catalog.DMLResult
-		deleteErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
-			var err error
-			dmlResult, err = deletableTable.Delete(txCtx, rowIDs)
-			return err
-		})
-
-		if deleteErr != nil {
-			return deleteErr
-		}
-
-		// Send RETURNING data through output channel if requested
-		if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
-			for dmlResult.ReturningData.Next() {
-				outBatch := dmlResult.ReturningData.RecordBatch()
-				outBatch.Retain()
-
-				select {
-				case outputCh <- outBatch:
-				case <-egCtx.Done():
-					outBatch.Release()
-					return egCtx.Err()
-				}
-			}
-			if err := dmlResult.ReturningData.Err(); err != nil {
-				return err
 			}
 		}
 
@@ -629,14 +684,20 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 	// Writer goroutine: sends RETURNING batches back to client
 	eg.Go(func() error {
 		for batch := range outputCh {
-			if err := writer.Write(batch); err != nil {
-				batch.Release()
+			// Transform batch to match writer's expected schema (outputSchema)
+			// The table may return data with slightly different schema (e.g., different metadata)
+			transformedBatch := transformBatchSchema(batch, outputSchema, s.allocator)
+			if transformedBatch != batch {
+				batch.Release() // Release original if transformed
+			}
+			if err := writer.Write(transformedBatch); err != nil {
+				transformedBatch.Release()
 				return err
 			}
 			s.logger.Debug("Sent DELETE RETURNING batch",
-				"rows", batch.NumRows(),
+				"rows", transformedBatch.NumRows(),
 			)
-			batch.Release()
+			transformedBatch.Release()
 		}
 		return nil
 	})
@@ -709,6 +770,86 @@ func extractRowIDs(arr arrow.Array) ([]int64, error) {
 	}
 
 	return rowIDs, nil
+}
+
+// getTableColumnNames returns all column names from the table schema,
+// excluding pseudo-columns like rowid (identified by is_rowid metadata).
+// This is used to populate ReturningColumns for DML operations.
+func getTableColumnNames(table catalog.Table) []string {
+	schema := table.ArrowSchema(nil) // Get full schema
+	if schema == nil {
+		return nil
+	}
+
+	columns := make([]string, 0, schema.NumFields())
+	for i := 0; i < schema.NumFields(); i++ {
+		field := schema.Field(i)
+		// Skip rowid pseudo-column
+		if field.Name == "rowid" {
+			continue
+		}
+		if md := field.Metadata; md.Len() > 0 {
+			if idx := md.FindKey("is_rowid"); idx >= 0 && md.Values()[idx] == "true" {
+				continue
+			}
+		}
+		columns = append(columns, field.Name)
+	}
+	return columns
+}
+
+// transformBatchSchema creates a new record batch with the target schema.
+// This is needed when the table returns data with a slightly different schema
+// (e.g., different nullable flags or metadata) than what the writer expects.
+// If schemas match, returns the original batch unchanged.
+func transformBatchSchema(batch arrow.RecordBatch, targetSchema *arrow.Schema, alloc memory.Allocator) arrow.RecordBatch {
+	batchSchema := batch.Schema()
+	if batchSchema.Equal(targetSchema) {
+		return batch // No transformation needed
+	}
+
+	// Build column name to batch column index mapping
+	colNameToIdx := make(map[string]int)
+	for i := 0; i < batchSchema.NumFields(); i++ {
+		colNameToIdx[batchSchema.Field(i).Name] = i
+	}
+
+	// Create arrays for each target schema column
+	cols := make([]arrow.Array, targetSchema.NumFields())
+	numRows := batch.NumRows()
+	for i := 0; i < targetSchema.NumFields(); i++ {
+		targetField := targetSchema.Field(i)
+		if batchIdx, ok := colNameToIdx[targetField.Name]; ok {
+			// Column exists in batch - use it directly
+			// The data is the same, just the schema metadata differs
+			cols[i] = batch.Column(batchIdx)
+			cols[i].Retain()
+		} else {
+			// Column doesn't exist in batch - create null array
+			// This happens when RETURNING data doesn't include pseudo-columns like rowid
+			cols[i] = makeNullArray(alloc, targetField.Type, int(numRows))
+		}
+	}
+
+	// Create new record batch with target schema
+	newBatch := array.NewRecordBatch(targetSchema, cols, numRows)
+
+	// Release our references to the columns
+	for _, col := range cols {
+		if col != nil {
+			col.Release()
+		}
+	}
+
+	return newBatch
+}
+
+// makeNullArray creates an array of null values for the given Arrow type.
+func makeNullArray(alloc memory.Allocator, dt arrow.DataType, numRows int) arrow.Array {
+	bldr := array.NewBuilder(alloc, dt)
+	defer bldr.Release()
+	bldr.AppendNulls(numRows)
+	return bldr.NewArray()
 }
 
 // stripRowIDColumn removes the rowid column from records for UPDATE operations.

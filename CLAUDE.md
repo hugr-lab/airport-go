@@ -72,9 +72,9 @@ go work sync
 - No silent failures - errors must be handled explicitly
 
 ## Recent Changes
+- 006-returning-optimization: Added Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go
 - 005-module-reorganization: Added Go 1.25+
 - 004-column-statistics: Added Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go, ZStandard
-- 003-ddl-operations: DDL operations (CREATE/DROP SCHEMA, CREATE/DROP TABLE, ADD/REMOVE COLUMN), DynamicCatalog/Schema/Table interfaces, CTAS support
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

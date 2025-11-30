@@ -261,7 +261,7 @@ func (t *UsersTable) Scan(_ context.Context, _ *catalog.ScanOptions) (array.Reco
 
 // InsertableTable interface implementation
 
-func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -301,7 +301,7 @@ func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader) (*cata
 
 // UpdatableTable interface implementation
 
-func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -358,7 +358,7 @@ func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.Reco
 
 // DeletableTable interface implementation
 
-func (t *UsersTable) Delete(ctx context.Context, rowIDs []int64) (*catalog.DMLResult, error) {
+func (t *UsersTable) Delete(ctx context.Context, rowIDs []int64, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
