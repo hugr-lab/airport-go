@@ -188,9 +188,10 @@ type InsertableTable interface {
 
     // Insert adds new rows to the table.
     // The rows RecordReader provides batches of data to insert.
+    // opts contains RETURNING clause information.
     // Returns DMLResult with affected row count and optional returning data.
     // Caller MUST call rows.Release() after Insert returns.
-    Insert(ctx context.Context, rows array.RecordReader) (*DMLResult, error)
+    Insert(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
 }
 ```
 
@@ -205,8 +206,9 @@ type UpdatableTable interface {
     // Update modifies existing rows identified by rowIDs.
     // The rows RecordReader provides replacement data for matched rows.
     // Row order in RecordReader must correspond to rowIDs order.
+    // opts contains RETURNING clause information.
     // Returns DMLResult with affected row count.
-    Update(ctx context.Context, rowIDs []int64, rows array.RecordReader) (*DMLResult, error)
+    Update(ctx context.Context, rowIDs []int64, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
 }
 ```
 
@@ -219,8 +221,34 @@ type DeletableTable interface {
     Table
 
     // Delete removes rows identified by rowIDs.
+    // opts contains RETURNING clause information.
     // Returns DMLResult with affected row count.
-    Delete(ctx context.Context, rowIDs []int64) (*DMLResult, error)
+    Delete(ctx context.Context, rowIDs []int64, opts *DMLOptions) (*DMLResult, error)
+}
+```
+
+### catalog.DMLOptions
+
+Options for DML operations:
+
+```go
+type DMLOptions struct {
+    // Returning indicates whether a RETURNING clause was specified.
+    // When true, the implementation should populate DMLResult.ReturningData.
+    Returning bool
+
+    // ReturningColumns specifies which columns to include in RETURNING results.
+    // Only meaningful when Returning is true.
+    //
+    // IMPORTANT: DuckDB Airport extension does NOT communicate which specific
+    // columns are in the RETURNING clause (e.g., "RETURNING id" vs "RETURNING *").
+    // The protocol only sends a boolean flag (return-chunks header).
+    //
+    // The server populates ReturningColumns with ALL table column names
+    // (excluding pseudo-columns like rowid) to indicate "return all columns".
+    // DuckDB handles column projection CLIENT-SIDE: the server returns all
+    // available columns, and DuckDB filters to only the requested columns.
+    ReturningColumns []string
 }
 ```
 
@@ -235,7 +263,36 @@ type DMLResult struct {
 
     // ReturningData contains rows affected by the operation when
     // a RETURNING clause was specified. nil if no RETURNING requested.
+    // Caller is responsible for releasing resources (RecordReader.Release).
     ReturningData array.RecordReader
+}
+```
+
+**Example Implementation:**
+
+```go
+func (t *MyTable) Insert(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+    var insertedRows []MyRow
+
+    // Process input rows
+    for rows.Next() {
+        batch := rows.RecordBatch()
+        // Insert data and track inserted rows for RETURNING
+        insertedRows = append(insertedRows, t.insertBatch(batch)...)
+    }
+
+    result := &catalog.DMLResult{
+        AffectedRows: int64(len(insertedRows)),
+    }
+
+    // Build RETURNING data if requested
+    if opts != nil && opts.Returning && len(insertedRows) > 0 {
+        // Project schema to ReturningColumns
+        returningSchema := catalog.ProjectSchema(t.schema, opts.ReturningColumns)
+        result.ReturningData = t.buildReturningReader(returningSchema, insertedRows)
+    }
+
+    return result, nil
 }
 ```
 
