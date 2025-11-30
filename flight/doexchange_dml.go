@@ -88,9 +88,18 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 		"input_schema", inputSchema,
 	)
 
+	// Determine output schema for RETURNING data
+	// For RETURNING, use table schema projected to returning columns (all columns except rowid)
+	// This allows returning auto-generated columns like 'id' that aren't in the input
+	var outputSchema *arrow.Schema
+	if returnData {
+		outputSchema = catalog.ProjectSchema(table.ArrowSchema(nil), getTableColumnNames(table))
+	} else {
+		outputSchema = inputSchema
+	}
+
 	// Create a writer to send output schema (required for bidirectional exchange)
-	// Even if not returning data, we may need to send a schema to initiate the response stream
-	writer := NewSchemaWriter(stream, inputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
 	defer writer.Close()
 
 	// Send schema to client to acknowledge and enable bidirectional data flow
@@ -312,9 +321,13 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		return status.Errorf(codes.InvalidArgument, "UPDATE requires rowid column in input schema")
 	}
 
+	// For UPDATE, the output schema must match the input schema that DuckDB expects
+	// DuckDB sends [updated_cols..., id, rowid] and expects the same schema back
+	// The transformBatchSchema handles adapting table's RETURNING data to this schema
+	outputSchema := inputSchema
+
 	// Create a writer to send output schema (required for bidirectional exchange)
-	// Use inputSchema because DuckDB expects the output schema to match input for UPDATE
-	writer := NewSchemaWriter(stream, inputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
 	defer writer.Close()
 
 	// Send schema to client to acknowledge and enable bidirectional data flow
@@ -459,9 +472,9 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 			s.logger.Debug("Writing UPDATE RETURNING batch to stream",
 				"rows", batch.NumRows(),
 			)
-			// Transform batch to match writer's expected schema (inputSchema)
-			// The table may return data with slightly different schema (e.g., without rowid)
-			transformedBatch := transformBatchSchema(batch, inputSchema, s.allocator)
+			// Transform batch to match writer's expected schema (outputSchema)
+			// The table may return data with slightly different schema
+			transformedBatch := transformBatchSchema(batch, outputSchema, s.allocator)
 			if transformedBatch != batch {
 				batch.Release() // Release original if transformed
 			}
@@ -554,11 +567,12 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		"input_schema", inputSchema,
 	)
 
-	// For DELETE with RETURNING, we need to use the table's schema for output
+	// Determine output schema for RETURNING data
+	// For RETURNING, use table schema projected to returning columns (all columns except rowid)
 	// because inputSchema only contains rowid, but client expects full table data
 	var outputSchema *arrow.Schema
 	if returnData {
-		outputSchema = table.ArrowSchema(nil) // Get full table schema
+		outputSchema = catalog.ProjectSchema(table.ArrowSchema(nil), getTableColumnNames(table))
 	} else {
 		outputSchema = inputSchema
 	}
