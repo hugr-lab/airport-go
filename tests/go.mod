@@ -6,7 +6,7 @@ require (
 	github.com/apache/arrow-go/v18 v18.4.1
 	github.com/duckdb/duckdb-go/v2 v2.5.3
 	github.com/google/uuid v1.6.0
-	github.com/hugr-lab/airport-go v0.1.0
+	github.com/hugr-lab/airport-go v0.1.1
 	github.com/paulmach/orb v0.12.0
 	google.golang.org/grpc v1.75.0
 )
