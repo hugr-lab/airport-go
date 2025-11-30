@@ -91,11 +91,19 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 	// Determine output schema for RETURNING data
 	// For RETURNING, use table schema projected to returning columns (all columns except rowid)
 	// This allows returning auto-generated columns like 'id' that aren't in the input
-	var outputSchema *arrow.Schema
+	outputSchema := table.ArrowSchema(nil)
+
+	// Create DMLOptions with RETURNING information
+	// Note: DuckDB Airport extension does not communicate which specific columns
+	// are in the RETURNING clause. When RETURNING is requested, we populate
+	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
+	// DuckDB handles column projection client-side after receiving server response.
+	opts := &catalog.DMLOptions{
+		Returning: returnData,
+	}
 	if returnData {
-		outputSchema = catalog.ProjectSchema(table.ArrowSchema(nil), getTableColumnNames(table))
-	} else {
-		outputSchema = inputSchema
+		opts.ReturningColumns = getTableColumnNames(table)
+		outputSchema = catalog.ProjectSchema(outputSchema, opts.ReturningColumns)
 	}
 
 	// Create a writer to send output schema (required for bidirectional exchange)
@@ -115,18 +123,6 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 
 	// Track results across pipeline
 	var totalRows int64
-
-	// Create DMLOptions with RETURNING information
-	// Note: DuckDB Airport extension does not communicate which specific columns
-	// are in the RETURNING clause. When RETURNING is requested, we populate
-	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
-	// DuckDB handles column projection client-side after receiving server response.
-	opts := &catalog.DMLOptions{
-		Returning: returnData,
-	}
-	if returnData {
-		opts.ReturningColumns = getTableColumnNames(table)
-	}
 
 	// Error group for managing goroutines
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -325,6 +321,19 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 	// DuckDB sends [updated_cols..., id, rowid] and expects the same schema back
 	// The transformBatchSchema handles adapting table's RETURNING data to this schema
 	outputSchema := inputSchema
+	// Create DMLOptions with RETURNING information
+	// Note: DuckDB Airport extension does not communicate which specific columns
+	// are in the RETURNING clause. When RETURNING is requested, we populate
+	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
+	// DuckDB handles column projection client-side after receiving server response.
+	opts := &catalog.DMLOptions{
+		Returning: returnData,
+	}
+	if returnData {
+		opts.ReturningColumns = getTableColumnNames(table)
+		// Note: For UPDATE, we keep outputSchema as inputSchema since DuckDB expects
+		// the same schema back. The transformBatchSchema handles the adaptation.
+	}
 
 	// Create a writer to send output schema (required for bidirectional exchange)
 	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
@@ -342,18 +351,6 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 
 	// Track results across pipeline
 	var totalRows int64
-
-	// Create DMLOptions with RETURNING information
-	// Note: DuckDB Airport extension does not communicate which specific columns
-	// are in the RETURNING clause. When RETURNING is requested, we populate
-	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
-	// DuckDB handles column projection client-side after receiving server response.
-	opts := &catalog.DMLOptions{
-		Returning: returnData,
-	}
-	if returnData {
-		opts.ReturningColumns = getTableColumnNames(table)
-	}
 
 	// Error group for managing goroutines
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -562,19 +559,25 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		return status.Errorf(codes.Internal, "failed to create input record reader: %v", err)
 	}
 
-	inputSchema := inputReader.Schema()
 	s.logger.Debug("Created record reader for DELETE",
-		"input_schema", inputSchema,
+		"input_schema", inputReader.Schema(),
 	)
 
 	// Determine output schema for RETURNING data
 	// For RETURNING, use table schema projected to returning columns (all columns except rowid)
 	// because inputSchema only contains rowid, but client expects full table data
-	var outputSchema *arrow.Schema
+	outputSchema := table.ArrowSchema(nil)
+	// Create DMLOptions with RETURNING information
+	// Note: DuckDB Airport extension does not communicate which specific columns
+	// are in the RETURNING clause. When RETURNING is requested, we populate
+	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
+	// DuckDB handles column projection client-side after receiving server response.
+	opts := &catalog.DMLOptions{
+		Returning: returnData,
+	}
 	if returnData {
-		outputSchema = catalog.ProjectSchema(table.ArrowSchema(nil), getTableColumnNames(table))
-	} else {
-		outputSchema = inputSchema
+		opts.ReturningColumns = getTableColumnNames(table)
+		outputSchema = catalog.ProjectSchema(outputSchema, opts.ReturningColumns)
 	}
 
 	// Create a writer to send output schema (required for bidirectional exchange)
@@ -593,18 +596,6 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 
 	// Track results across pipeline
 	var totalRows int64
-
-	// Create DMLOptions with RETURNING information
-	// Note: DuckDB Airport extension does not communicate which specific columns
-	// are in the RETURNING clause. When RETURNING is requested, we populate
-	// ReturningColumns with all table columns (excluding pseudo-columns like rowid).
-	// DuckDB handles column projection client-side after receiving server response.
-	opts := &catalog.DMLOptions{
-		Returning: returnData,
-	}
-	if returnData {
-		opts.ReturningColumns = getTableColumnNames(table)
-	}
 
 	// Error group for managing goroutines
 	eg, egCtx := errgroup.WithContext(ctx)
