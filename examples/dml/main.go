@@ -270,6 +270,11 @@ func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader, opts *
 		fmt.Printf("[UsersTable] INSERT in transaction %s\n", txID[:8])
 	}
 
+	// Log RETURNING info if requested
+	if opts != nil && opts.Returning {
+		fmt.Printf("[UsersTable] INSERT with RETURNING requested, columns: %v\n", opts.ReturningColumns)
+	}
+
 	var totalRows int64
 
 	for rows.Next() {
@@ -308,6 +313,11 @@ func (t *UsersTable) Update(ctx context.Context, rowIDs []int64, rows array.Reco
 	// Check if running in transaction context
 	if txID, ok := catalog.TransactionIDFromContext(ctx); ok {
 		fmt.Printf("[UsersTable] UPDATE in transaction %s\n", txID[:8])
+	}
+
+	// Log RETURNING info if requested
+	if opts != nil && opts.Returning {
+		fmt.Printf("[UsersTable] UPDATE with RETURNING requested, columns: %v\n", opts.ReturningColumns)
 	}
 
 	// Build rowid to index mapping
@@ -365,6 +375,11 @@ func (t *UsersTable) Delete(ctx context.Context, rowIDs []int64, opts *catalog.D
 	// Check if running in transaction context
 	if txID, ok := catalog.TransactionIDFromContext(ctx); ok {
 		fmt.Printf("[UsersTable] DELETE in transaction %s\n", txID[:8])
+	}
+
+	// Log RETURNING info if requested
+	if opts != nil && opts.Returning {
+		fmt.Printf("[UsersTable] DELETE with RETURNING requested, columns: %v\n", opts.ReturningColumns)
 	}
 
 	// Build set of rowids to delete

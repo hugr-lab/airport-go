@@ -294,7 +294,7 @@ func (t *mockDynamicTable) Scan(_ context.Context, _ *catalog.ScanOptions) (arra
 }
 
 // Insert adds rows to the table (implements InsertableTable).
-func (t *mockDynamicTable) Insert(_ context.Context, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *mockDynamicTable) Insert(_ context.Context, rows array.RecordReader, _ *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
