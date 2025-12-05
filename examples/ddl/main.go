@@ -373,7 +373,7 @@ func (t *DDLTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.R
 }
 
 // Insert implements catalog.InsertableTable (for CREATE TABLE AS SELECT).
-func (t *DDLTable) Insert(_ context.Context, rows array.RecordReader) (*catalog.DMLResult, error) {
+func (t *DDLTable) Insert(_ context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

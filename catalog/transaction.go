@@ -1,6 +1,10 @@
 package catalog
 
-import "context"
+import (
+	"context"
+
+	"github.com/hugr-lab/airport-go/internal/txcontext"
+)
 
 // TransactionState represents the lifecycle stage of a transaction.
 type TransactionState string
@@ -50,19 +54,8 @@ type TransactionManager interface {
 	GetTransactionStatus(ctx context.Context, txID string) (TransactionState, bool)
 }
 
-// txKey is the unexported context key for transaction ID.
-// Using a struct type prevents collisions with other context values.
-type txKey struct{}
-
-// WithTransactionID returns a new context with the transaction ID stored.
-// Use this to propagate transaction context through handler calls.
-func WithTransactionID(ctx context.Context, txID string) context.Context {
-	return context.WithValue(ctx, txKey{}, txID)
-}
-
 // TransactionIDFromContext retrieves the transaction ID if present.
 // Returns ("", false) if no transaction ID is set.
 func TransactionIDFromContext(ctx context.Context) (string, bool) {
-	txID, ok := ctx.Value(txKey{}).(string)
-	return txID, ok
+	return txcontext.TransactionIDFromContext(ctx)
 }

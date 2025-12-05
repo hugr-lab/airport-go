@@ -32,12 +32,12 @@ func (f *UppercaseFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String},
 		ReturnType: arrow.BinaryTypes.String,
-		Variadic:   false,
 	}
 }
 
 // Execute applies the uppercase transformation to an Arrow record.
 // This processes entire batches at once (vectorized execution).
+//
 //nolint:unparam
 func (f *UppercaseFunc) Execute(ctx context.Context, input arrow.RecordBatch) (arrow.RecordBatch, error) {
 	if input.NumCols() != 1 {
@@ -92,7 +92,6 @@ func (f *LengthFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 

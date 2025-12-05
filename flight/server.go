@@ -45,6 +45,12 @@ func NewServer(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Log
 // NewServerWithTxManager creates a new Flight server with transaction management support.
 // The txManager parameter is optional - if nil, operations execute without transaction coordination.
 func NewServerWithTxManager(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Logger, address string, txManager catalog.TransactionManager) *Server {
+	switch {
+	case address == "":
+		address = flight.LocationReuseConnection
+	case !strings.HasPrefix(address, "grpc://") && !strings.HasPrefix(address, "grpc+tls://"):
+		address = "grpc://" + address
+	}
 	return &Server{
 		catalog:   cat,
 		allocator: allocator,

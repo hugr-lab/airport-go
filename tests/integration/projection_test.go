@@ -262,9 +262,9 @@ func TestTableFunctionColumnProjection(t *testing.T) {
 		}
 
 		expected := []row{
-			{col1: 1, col3: 3},   // row 1: 1*1, 1*3
-			{col1: 2, col3: 6},   // row 2: 2*1, 2*3
-			{col1: 3, col3: 9},   // row 3: 3*1, 3*3
+			{col1: 1, col3: 3}, // row 1: 1*1, 1*3
+			{col1: 2, col3: 6}, // row 2: 2*1, 2*3
+			{col1: 3, col3: 9}, // row 3: 3*1, 3*3
 		}
 
 		if len(results) != len(expected) {
@@ -367,8 +367,8 @@ func (t *projectionTestTable) GetRequestedCols() []string {
 	return t.requestedCols
 }
 
-func (t *projectionTestTable) Name() string               { return "data" }
-func (t *projectionTestTable) Comment() string            { return "Test table for column projection" }
+func (t *projectionTestTable) Name() string    { return "data" }
+func (t *projectionTestTable) Comment() string { return "Test table for column projection" }
 func (t *projectionTestTable) ArrowSchema(columns []string) *arrow.Schema {
 	return catalog.ProjectSchema(t.schema, columns)
 }
@@ -420,8 +420,10 @@ func projectionTestCatalog(t *testing.T, table *projectionTestTable) catalog.Cat
 
 type generateRangeWithProjection struct{}
 
-func (f *generateRangeWithProjection) Name() string    { return "GENERATE_RANGE" }
-func (f *generateRangeWithProjection) Comment() string { return "Generate range with column projection" }
+func (f *generateRangeWithProjection) Name() string { return "GENERATE_RANGE" }
+func (f *generateRangeWithProjection) Comment() string {
+	return "Generate range with column projection"
+}
 
 func (f *generateRangeWithProjection) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
@@ -431,7 +433,6 @@ func (f *generateRangeWithProjection) Signature() catalog.FunctionSignature {
 			arrow.PrimitiveTypes.Int64, // column_count
 		},
 		ReturnType: nil,
-		Variadic:   false,
 	}
 }
 
@@ -508,4 +509,3 @@ func toInt64Value(v any) int64 {
 		return 0
 	}
 }
-

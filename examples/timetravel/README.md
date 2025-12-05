@@ -147,6 +147,9 @@ type SchemaRequest struct {
     TimePoint *TimePoint
 
     // Columns specifies which columns to include (projection)
+    // The server should return a full schema, the projection is handled by duckdb.
+    // The server may use this information for optimization.
+    // The unselected columns can contain nulls or default values in the returned arrays.
     Columns []string
 }
 

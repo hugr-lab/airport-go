@@ -50,7 +50,7 @@ CREATE PERSISTENT SECRET airport_auth_secret (
 );
 
 -- Attach the server (secret applies automatically via scope)
-ATTACH 'airport_catalog' AS airport_catalog (
+ATTACH '' AS airport_catalog (
     TYPE AIRPORT,
     location 'grpc://localhost:50052'
 );
@@ -65,7 +65,7 @@ Try connecting without a secret (no matching scope):
 
 ```sql
 -- Attach without authentication secret (different port, no secret)
-ATTACH 'no_auth_catalog' AS no_auth_catalog (
+ATTACH '' AS no_auth_catalog (
     TYPE AIRPORT,
     location 'grpc://localhost:50053'
 );

@@ -509,7 +509,6 @@ type ScalarFunction interface {
 type FunctionSignature struct {
     Parameters []arrow.DataType // Parameter types (in order)
     ReturnType arrow.DataType   // Return type (nil for table functions)
-    Variadic   bool             // Last param accepts multiple values
 }
 ```
 

@@ -369,7 +369,6 @@ func (m *mockScalarFunc) Signature() FunctionSignature {
 	return FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Int64},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 
@@ -394,7 +393,6 @@ func (m *mockTableFunc) Signature() FunctionSignature {
 	return FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String},
 		ReturnType: nil,
-		Variadic:   false,
 	}
 }
 

@@ -118,10 +118,13 @@ type txState struct {
 }
 
 func NewInMemoryTransactionManager(table *UsersTable) *InMemoryTransactionManager {
-	return &InMemoryTransactionManager{
+	tm := &InMemoryTransactionManager{
 		transactions: make(map[string]*txState),
 		table:        table,
 	}
+	table.txManager = tm
+
+	return tm
 }
 
 func (m *InMemoryTransactionManager) BeginTransaction(_ context.Context) (string, error) {
@@ -217,6 +220,8 @@ type UsersTable struct {
 	mu        sync.RWMutex
 	data      [][]any // Each row: [rowid, id, name, email]
 	nextRowID int64
+
+	txManager catalog.TransactionManager
 }
 
 // NewUsersTable creates a new writable users table.
@@ -266,7 +271,8 @@ func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader, opts *
 	defer t.mu.Unlock()
 
 	// Check if running in transaction context
-	if txID, ok := catalog.TransactionIDFromContext(ctx); ok {
+	txID, inTx := catalog.TransactionIDFromContext(ctx)
+	if inTx {
 		fmt.Printf("[UsersTable] INSERT in transaction %s\n", txID[:8])
 	}
 
@@ -289,6 +295,9 @@ func (t *UsersTable) Insert(ctx context.Context, rows array.RecordReader, opts *
 			for colIdx := 0; colIdx < int(batch.NumCols()); colIdx++ {
 				col := batch.Column(colIdx)
 				row[colIdx+1] = extractValue(col, int(rowIdx))
+			}
+			if t.checkIDExists(row[1].(int64)) {
+				return nil, fmt.Errorf("id %d already exists", row[1].(int64))
 			}
 			t.data = append(t.data, row)
 			t.nextRowID++
@@ -433,6 +442,15 @@ func (t *UsersTable) buildColumnMapping(inputSchema *arrow.Schema) map[int]int {
 		}
 	}
 	return mapping
+}
+
+func (t *UsersTable) checkIDExists(rowID int64) bool {
+	for _, row := range t.data {
+		if rid, ok := row[1].(int64); ok && rid == rowID {
+			return true
+		}
+	}
+	return false
 }
 
 func extractValue(col arrow.Array, idx int) any {

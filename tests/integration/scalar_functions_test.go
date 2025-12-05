@@ -818,7 +818,6 @@ func (f *uppercaseFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String},
 		ReturnType: arrow.BinaryTypes.String,
-		Variadic:   false,
 	}
 }
 
@@ -863,7 +862,6 @@ func (f *lengthFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 
@@ -908,7 +906,6 @@ func (f *concatFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String, arrow.BinaryTypes.String},
 		ReturnType: arrow.BinaryTypes.String,
-		Variadic:   false,
 	}
 }
 
@@ -953,7 +950,6 @@ func (f *addFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Int64},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 
@@ -998,7 +994,6 @@ func (f *multiplyFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Float64, arrow.PrimitiveTypes.Float64},
 		ReturnType: arrow.PrimitiveTypes.Float64,
-		Variadic:   false,
 	}
 }
 
@@ -1043,7 +1038,6 @@ func (f *isPositiveFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Int64},
 		ReturnType: arrow.FixedWidthTypes.Boolean,
-		Variadic:   false,
 	}
 }
 
@@ -1086,7 +1080,6 @@ func (f *errorFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Int64},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 
@@ -1109,7 +1102,6 @@ func (f *wrongTypeFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Int64},
 		ReturnType: arrow.PrimitiveTypes.Int64, // Says it returns Int64
-		Variadic:   false,
 	}
 }
 

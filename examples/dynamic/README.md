@@ -43,17 +43,21 @@ INSTALL airport FROM community;
 LOAD airport;
 
 -- Connect as regular user
-ATTACH '' AS demo (
+CREATE OR REPLACE SECRET demo_secret (
     TYPE airport,
     LOCATION 'grpc://localhost:50053',
-    TOKEN 'user-token'
+    auth_token 'user-token'
 );
 
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50053');
+
 -- List schemas (only sees 'public')
-SELECT schema_name FROM information_schema.schemata WHERE catalog_name = 'demo';
+SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'demo';
 
 -- Query live metrics
 SELECT * FROM demo.public.metrics;
+
+DETACH demo;
 ```
 
 ### As an Admin User
@@ -62,14 +66,16 @@ Connect with admin token (sees both schemas):
 
 ```sql
 -- Connect as admin
-ATTACH '' AS admin_demo (
+CREATE OR REPLACE SECRET demo_secret (
     TYPE airport,
     LOCATION 'grpc://localhost:50053',
-    TOKEN 'admin-token'
+    auth_token 'admin-token'
 );
 
+ATTACH '' AS admin_demo (TYPE airport, LOCATION 'grpc://localhost:50053');
+
 -- List schemas (sees 'public' and 'admin')
-SELECT schema_name FROM information_schema.schemata WHERE catalog_name = 'admin_demo';
+SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'admin_demo';
 
 -- Query admin settings
 SELECT * FROM admin_demo.admin.settings;
