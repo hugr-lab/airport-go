@@ -14,10 +14,10 @@ CREATE OR REPLACE SECRET airport_secret (
 ATTACH '' AS airport_catalog (TYPE airport, SECRET airport_secret, LOCATION 'grpc://localhost:50051');
 
 -- Query the users table
-SELECT * FROM airport_catalog.main.users;
+SELECT * FROM airport_catalog.demo.users;
 
 -- Display results with column information
-DESCRIBE SELECT * FROM airport_catalog.main.users;
+DESCRIBE SELECT * FROM airport_catalog.demo.users;
 
 -- Count rows
-SELECT COUNT(*) as total_users FROM airport_catalog.main.users;
+SELECT COUNT(*) as total_users FROM airport_catalog.demo.users;

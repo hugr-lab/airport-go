@@ -28,7 +28,7 @@ The server will start on `localhost:50051` and output:
 ```
 Airport DML server listening on :50051
 Example catalog contains:
-  - Schema: main
+  - Schema: test
     - Table: users (writable with transaction support)
 ```
 
@@ -53,22 +53,22 @@ ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 ```sql
 -- Insert data
-INSERT INTO demo.main.users (id, name, email) VALUES
+INSERT INTO demo.test.users (id, name, email) VALUES
     (1, 'Alice', 'alice@example.com'),
     (2, 'Bob', 'bob@example.com'),
     (3, 'Charlie', 'charlie@example.com');
 
 -- View the data
-SELECT * FROM demo.main.users;
+SELECT * FROM demo.test.users;
 
 -- Update a row
-UPDATE demo.main.users SET name = 'Alicia' WHERE id = 1;
+UPDATE demo.test.users SET name = 'Alicia' WHERE id = 1;
 
 -- Delete a row
-DELETE FROM demo.main.users WHERE id = 3;
+DELETE FROM demo.test.users WHERE id = 3;
 
 -- Verify changes
-SELECT * FROM demo.main.users;
+SELECT * FROM demo.test.users;
 ```
 
 ### Transaction Support
@@ -78,16 +78,16 @@ SELECT * FROM demo.main.users;
 BEGIN TRANSACTION;
 
 -- Insert data within transaction
-INSERT INTO demo.main.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');
+INSERT INTO demo.test.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');
 
 -- Data is visible within the transaction
-SELECT * FROM demo.main.users;
+SELECT * FROM demo.test.users;
 
 -- Rollback discards changes
 ROLLBACK;
 
 -- TxUser is gone
-SELECT * FROM demo.main.users;
+SELECT * FROM demo.test.users;
 ```
 
 ### Transaction with Commit
@@ -97,13 +97,13 @@ SELECT * FROM demo.main.users;
 BEGIN TRANSACTION;
 
 -- Make changes
-INSERT INTO demo.main.users (id, name, email) VALUES (200, 'Committed', 'commit@example.com');
+INSERT INTO demo.test.users (id, name, email) VALUES (200, 'Committed', 'commit@example.com');
 
 -- Commit persists changes
 COMMIT;
 
 -- Data is permanent
-SELECT * FROM demo.main.users;
+SELECT * FROM demo.test.users;
 ```
 
 ## Implementation Details

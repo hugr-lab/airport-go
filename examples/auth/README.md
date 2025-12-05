@@ -56,7 +56,7 @@ ATTACH 'airport_catalog' AS airport_catalog (
 );
 
 -- Query protected data
-SELECT * FROM airport_catalog.main.users;
+SELECT * FROM airport_catalog.app.users;
 ```
 
 ### Without Authentication (Should Fail)
@@ -71,7 +71,7 @@ ATTACH 'no_auth_catalog' AS no_auth_catalog (
 );
 
 -- This will fail with authentication error (assuming server is running)
-SELECT * FROM no_auth_catalog.main.users;
+SELECT * FROM no_auth_catalog.app.users;
 ```
 
 Expected error:

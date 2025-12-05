@@ -27,7 +27,7 @@ The server will start on `localhost:50051` and output:
 ```
 Airport Time Travel server listening on :50051
 Example catalog contains:
-  - Schema: main
+  - Schema: test
     - Table: users (supports time travel with 3 versions)
 
 Available versions:
@@ -57,7 +57,7 @@ ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 ```sql
 -- Get current (latest) data
-SELECT * FROM demo.main.users;
+SELECT * FROM demo.test.users;
 ```
 
 Expected output:
@@ -76,7 +76,7 @@ Expected output:
 
 ```sql
 -- Version 1: Only Alice existed
-SELECT * FROM demo.main.users AT (VERSION => 1);
+SELECT * FROM demo.test.users AT (VERSION => 1);
 ```
 
 Output:
@@ -91,7 +91,7 @@ Output:
 
 ```sql
 -- Version 2: Alice and Bob
-SELECT * FROM demo.main.users AT (VERSION => 2);
+SELECT * FROM demo.test.users AT (VERSION => 2);
 ```
 
 Output:
@@ -109,7 +109,7 @@ Output:
 
 ```sql
 -- Select specific columns at a version
-SELECT name FROM demo.main.users AT (VERSION => 2);
+SELECT name FROM demo.test.users AT (VERSION => 2);
 ```
 
 Output:

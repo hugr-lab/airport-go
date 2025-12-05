@@ -9,15 +9,15 @@
 //	ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 //
 //	-- Query current data:
-//	SELECT * FROM demo.main.users;
+//	SELECT * FROM demo.test.users;
 //
 //	-- Query data at specific versions:
-//	SELECT * FROM demo.main.users AT (VERSION => 1);  -- Only Alice
-//	SELECT * FROM demo.main.users AT (VERSION => 2);  -- Alice + Bob
-//	SELECT * FROM demo.main.users AT (VERSION => 3);  -- All three users
+//	SELECT * FROM demo.test.users AT (VERSION => 1);  -- Only Alice
+//	SELECT * FROM demo.test.users AT (VERSION => 2);  -- Alice + Bob
+//	SELECT * FROM demo.test.users AT (VERSION => 3);  -- All three users
 //
 //	-- Query with column selection (projection pushdown):
-//	SELECT name FROM demo.main.users AT (VERSION => 2);
+//	SELECT name FROM demo.test.users AT (VERSION => 2);
 package main
 
 import (
@@ -43,7 +43,7 @@ func main() {
 
 	// Build catalog
 	cat, err := airport.NewCatalogBuilder().
-		Schema("main").
+		Schema("test").
 		Table(table).
 		Build()
 	if err != nil {
@@ -71,7 +71,7 @@ func main() {
 
 	log.Println("Airport Time Travel server listening on :50051")
 	log.Println("Example catalog contains:")
-	log.Println("  - Schema: main")
+	log.Println("  - Schema: test")
 	log.Println("    - Table: users (time travel enabled)")
 	log.Println("")
 	log.Println("Data versions:")
@@ -81,12 +81,12 @@ func main() {
 	log.Println("")
 	log.Println("Test with DuckDB CLI:")
 	log.Println("  ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');")
-	log.Println("  SELECT * FROM demo.main.users;                    -- Current (v3)")
-	log.Println("  SELECT * FROM demo.main.users AT (VERSION => 1);  -- v1: Alice")
-	log.Println("  SELECT * FROM demo.main.users AT (VERSION => 2);  -- v2: Alice+Bob")
+	log.Println("  SELECT * FROM demo.test.users;                    -- Current (v3)")
+	log.Println("  SELECT * FROM demo.test.users AT (VERSION => 1);  -- v1: Alice")
+	log.Println("  SELECT * FROM demo.test.users AT (VERSION => 2);  -- v2: Alice+Bob")
 	log.Println("")
 	log.Println("Column projection (returns only requested columns):")
-	log.Println("  SELECT name FROM demo.main.users;")
+	log.Println("  SELECT name FROM demo.test.users;")
 
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
@@ -139,8 +139,10 @@ func NewTimeTravelUsersTable() *TimeTravelUsersTable {
 
 // Table interface implementation
 
-func (t *TimeTravelUsersTable) Name() string               { return "users" }
-func (t *TimeTravelUsersTable) Comment() string            { return "Users table with time travel support (versions 1-3)" }
+func (t *TimeTravelUsersTable) Name() string { return "users" }
+func (t *TimeTravelUsersTable) Comment() string {
+	return "Users table with time travel support (versions 1-3)"
+}
 func (t *TimeTravelUsersTable) ArrowSchema(columns []string) *arrow.Schema {
 	return catalog.ProjectSchema(t.schema, columns)
 }

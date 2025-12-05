@@ -21,10 +21,10 @@ ATTACH 'airport_catalog' AS airport_catalog (
 );
 
 -- Query protected data using the authenticated connection
-SELECT * FROM airport_catalog.main.users;
+SELECT * FROM airport_catalog.app.users;
 
 -- Verify authentication is working
-SELECT COUNT(*) as total_users FROM airport_catalog.main.users;
+SELECT COUNT(*) as total_users FROM airport_catalog.app.users;
 
 -- Example: Query specific user
-SELECT * FROM airport_catalog.main.users WHERE id = 1;
+SELECT * FROM airport_catalog.app.users WHERE id = 1;

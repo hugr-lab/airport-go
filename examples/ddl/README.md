@@ -28,7 +28,7 @@ The server will start on `localhost:50051` and output:
 Airport DDL server listening on :50051
 
 Example catalog structure:
-  - Schema: main
+  - Schema: data
     - Table: sample (id INTEGER, name VARCHAR)
 
 Test with DuckDB CLI:
@@ -52,7 +52,7 @@ LOAD airport;
 ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- View existing schema and table
-SELECT * FROM demo.main.sample;
+SELECT * FROM demo.data.sample;
 ```
 
 ### Schema Operations
@@ -72,58 +72,58 @@ CREATE SCHEMA IF NOT EXISTS demo.reports;
 
 ```sql
 -- Create a new table
-CREATE TABLE demo.main.users (
+CREATE TABLE demo.data.users (
     id INTEGER,
     name VARCHAR,
     email VARCHAR
 );
 
 -- View the table structure
-DESCRIBE demo.main.users;
+DESCRIBE demo.data.users;
 
 -- Drop a table
-DROP TABLE demo.main.users;
+DROP TABLE demo.data.users;
 
 -- Drop table if exists
-DROP TABLE IF EXISTS demo.main.users;
+DROP TABLE IF EXISTS demo.data.users;
 ```
 
 ### Column Operations (ALTER TABLE)
 
 ```sql
 -- Create a table to alter
-CREATE TABLE demo.main.products (
+CREATE TABLE demo.data.products (
     id INTEGER,
     name VARCHAR
 );
 
 -- Add a new column
-ALTER TABLE demo.main.products ADD COLUMN price DOUBLE;
+ALTER TABLE demo.data.products ADD COLUMN price DOUBLE;
 
 -- Rename a column
-ALTER TABLE demo.main.products RENAME COLUMN name TO product_name;
+ALTER TABLE demo.data.products RENAME COLUMN name TO product_name;
 
 -- Drop a column
-ALTER TABLE demo.main.products DROP COLUMN price;
+ALTER TABLE demo.data.products DROP COLUMN price;
 
 -- View changes
-DESCRIBE demo.main.products;
+DESCRIBE demo.data.products;
 ```
 
 ### CREATE TABLE AS SELECT
 
 ```sql
 -- Create source table
-CREATE TABLE demo.main.source (id INTEGER, value VARCHAR);
+CREATE TABLE demo.data.source (id INTEGER, value VARCHAR);
 
 -- Insert data (requires InsertableTable implementation)
-INSERT INTO demo.main.source VALUES (1, 'one'), (2, 'two');
+INSERT INTO demo.data.source VALUES (1, 'one'), (2, 'two');
 
 -- Create table from query
-CREATE TABLE demo.main.backup AS SELECT * FROM demo.main.source;
+CREATE TABLE demo.data.backup AS SELECT * FROM demo.data.source;
 
 -- Verify data was copied
-SELECT * FROM demo.main.backup;
+SELECT * FROM demo.data.backup;
 ```
 
 ## Implementation Details

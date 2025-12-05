@@ -46,12 +46,12 @@ func main() {
 	cat := NewDDLCatalog()
 
 	// Pre-create a schema with a sample table
-	mainSchema := cat.GetOrCreateSchema("main")
+	dataSchema := cat.GetOrCreateSchema("data")
 	usersSchema := arrow.NewSchema([]arrow.Field{
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64, Nullable: false},
 		{Name: "name", Type: arrow.BinaryTypes.String, Nullable: false},
 	}, nil)
-	_, _ = mainSchema.CreateTable(context.Background(), "sample", usersSchema, catalog.CreateTableOptions{
+	_, _ = dataSchema.CreateTable(context.Background(), "sample", usersSchema, catalog.CreateTableOptions{
 		Comment: "Sample table created at startup",
 	})
 
@@ -78,7 +78,7 @@ func main() {
 	log.Println("Airport DDL server listening on :50051")
 	log.Println("")
 	log.Println("Example catalog structure:")
-	log.Println("  - Schema: main")
+	log.Println("  - Schema: data")
 	log.Println("    - Table: sample (id INTEGER, name VARCHAR)")
 	log.Println("")
 	log.Println("Test with DuckDB CLI:")
@@ -89,10 +89,10 @@ func main() {
 	log.Println("  DROP SCHEMA demo.analytics;")
 	log.Println("")
 	log.Println("  -- Table operations:")
-	log.Println("  CREATE TABLE demo.main.users (id INTEGER, name VARCHAR);")
-	log.Println("  ALTER TABLE demo.main.users ADD COLUMN email VARCHAR;")
-	log.Println("  ALTER TABLE demo.main.users RENAME COLUMN name TO full_name;")
-	log.Println("  DROP TABLE demo.main.users;")
+	log.Println("  CREATE TABLE demo.data.users (id INTEGER, name VARCHAR);")
+	log.Println("  ALTER TABLE demo.data.users ADD COLUMN email VARCHAR;")
+	log.Println("  ALTER TABLE demo.data.users RENAME COLUMN name TO full_name;")
+	log.Println("  DROP TABLE demo.data.users;")
 
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)

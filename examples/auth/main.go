@@ -62,8 +62,8 @@ func main() {
 
 	// Build catalog with authentication-aware table
 	cat, err := airport.NewCatalogBuilder().
-		Schema("main").
-		Comment("Main application schema - requires authentication").
+		Schema("app").
+		Comment("Application schema - requires authentication").
 		SimpleTable(airport.SimpleTableDef{
 			Name:     "users",
 			Comment:  "User accounts - authenticated access only",
@@ -102,7 +102,7 @@ func main() {
 
 	log.Println("Authenticated Airport server listening on :50052")
 	log.Println("Example catalog contains:")
-	log.Println("  - Schema: main (requires authentication)")
+	log.Println("  - Schema: app (requires authentication)")
 	log.Println("    - Table: users (3 rows)")
 	log.Println("")
 	log.Println("Valid bearer tokens for testing:")

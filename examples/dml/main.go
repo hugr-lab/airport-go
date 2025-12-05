@@ -9,17 +9,17 @@
 //	ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
 //
 //	-- Basic DML operations:
-//	INSERT INTO demo.main.users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');
-//	SELECT * FROM demo.main.users;
-//	UPDATE demo.main.users SET name = 'Alicia' WHERE id = 1;
-//	DELETE FROM demo.main.users WHERE id = 1;
+//	INSERT INTO demo.test.users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');
+//	SELECT * FROM demo.test.users;
+//	UPDATE demo.test.users SET name = 'Alicia' WHERE id = 1;
+//	DELETE FROM demo.test.users WHERE id = 1;
 //
 //	-- Transaction with rollback (changes are discarded on error):
 //	BEGIN TRANSACTION;
-//	INSERT INTO demo.main.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');
-//	SELECT * FROM demo.main.users;  -- Shows TxUser
+//	INSERT INTO demo.test.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');
+//	SELECT * FROM demo.test.users;  -- Shows TxUser
 //	ROLLBACK;
-//	SELECT * FROM demo.main.users;  -- TxUser is gone
+//	SELECT * FROM demo.test.users;  -- TxUser is gone
 package main
 
 import (
@@ -50,7 +50,7 @@ func main() {
 
 	// Build catalog with the DML-capable table
 	cat, err := airport.NewCatalogBuilder().
-		Schema("main").
+		Schema("test").
 		Table(table).
 		Build()
 	if err != nil {
@@ -79,21 +79,21 @@ func main() {
 
 	log.Println("Airport DML server listening on :50051")
 	log.Println("Example catalog contains:")
-	log.Println("  - Schema: main")
+	log.Println("  - Schema: test")
 	log.Println("    - Table: users (writable with transaction support)")
 	log.Println("")
 	log.Println("Test with DuckDB CLI:")
 	log.Println("  ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');")
 	log.Println("")
 	log.Println("  -- Basic DML:")
-	log.Println("  INSERT INTO demo.main.users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');")
-	log.Println("  SELECT * FROM demo.main.users;")
+	log.Println("  INSERT INTO demo.test.users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');")
+	log.Println("  SELECT * FROM demo.test.users;")
 	log.Println("")
 	log.Println("  -- Transaction with rollback:")
 	log.Println("  BEGIN TRANSACTION;")
-	log.Println("  INSERT INTO demo.main.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');")
+	log.Println("  INSERT INTO demo.test.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');")
 	log.Println("  ROLLBACK;  -- Changes are discarded")
-	log.Println("  SELECT * FROM demo.main.users;  -- TxUser is gone")
+	log.Println("  SELECT * FROM demo.test.users;  -- TxUser is gone")
 
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve: %v", err)

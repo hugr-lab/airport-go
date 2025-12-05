@@ -39,7 +39,7 @@ The server will start on `localhost:50051` and output:
 ```
 Airport server listening on :50051
 Example catalog contains:
-  - Schema: main
+  - Schema: demo
     - Table: users (3 rows)
 ```
 
@@ -71,7 +71,7 @@ CREATE SECRET airport_secret (
 );
 
 -- Query the users table
-SELECT * FROM airport_catalog.main.users;
+SELECT * FROM airport_catalog.demo.users;
 ```
 
 ## Expected Output

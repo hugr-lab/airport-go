@@ -41,7 +41,7 @@ func main() {
 
 	// Build catalog with a single schema and table
 	cat, err := airport.NewCatalogBuilder().
-		Schema("main").
+		Schema("demo").
 		SimpleTable(airport.SimpleTableDef{
 			Name:     "users",
 			Comment:  "User accounts",
@@ -74,7 +74,7 @@ func main() {
 
 	log.Println("Airport server listening on :50051")
 	log.Println("Example catalog contains:")
-	log.Println("  - Schema: main")
+	log.Println("  - Schema: demo")
 	log.Println("    - Table: users (3 rows)")
 
 	if err := grpcServer.Serve(lis); err != nil {
