@@ -11,7 +11,7 @@
 //	SELECT MULTIPLY(value, 10) FROM demo.functions_demo.users;
 //
 //	-- Table function with all columns:
-//	SELECT * FROM demo.functions_demo.GENERATE_SERIES(1, 5);
+//	SELECT * FROM demo.functions_demo.GENERATE_SERIES(1, 5, null);  -- step=1
 //
 //	-- Table function with dynamic schema:
 //	SELECT * FROM demo.functions_demo.GENERATE_RANGE(1, 3, 4);  -- 4 columns
@@ -119,8 +119,10 @@ func NewUsersTableWithProjection() *UsersTableWithProjection {
 	return &UsersTableWithProjection{schema: schema, data: data}
 }
 
-func (t *UsersTableWithProjection) Name() string               { return "users" }
-func (t *UsersTableWithProjection) Comment() string            { return "Sample user data with column projection support" }
+func (t *UsersTableWithProjection) Name() string { return "users" }
+func (t *UsersTableWithProjection) Comment() string {
+	return "Sample user data with column projection support"
+}
 func (t *UsersTableWithProjection) ArrowSchema(columns []string) *arrow.Schema {
 	return catalog.ProjectSchema(t.schema, columns)
 }
@@ -214,7 +216,6 @@ func (f *multiplyFunc) Signature() catalog.FunctionSignature {
 			arrow.PrimitiveTypes.Int64, // multiplication factor
 		},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 
@@ -245,7 +246,7 @@ func (f *multiplyFunc) Execute(_ context.Context, input arrow.RecordBatch) (arro
 // Table Function: GENERATE_SERIES
 // =============================================================================
 
-// generateSeriesFunc generates a series of integers from start to stop.
+// generateSeriesFunc generates a series of integers from start to stop with given step.
 type generateSeriesFunc struct{}
 
 func (f *generateSeriesFunc) Name() string {
@@ -261,10 +262,9 @@ func (f *generateSeriesFunc) Signature() catalog.FunctionSignature {
 		Parameters: []arrow.DataType{
 			arrow.PrimitiveTypes.Int64, // start
 			arrow.PrimitiveTypes.Int64, // stop
-			arrow.PrimitiveTypes.Int64, // step (optional via variadic)
+			arrow.PrimitiveTypes.Int64, // step (optional)
 		},
 		ReturnType: nil, // Table function, schema from SchemaForParameters
-		Variadic:   true,
 	}
 }
 
@@ -275,10 +275,6 @@ func (f *generateSeriesFunc) SchemaForParameters(_ context.Context, _ []any) (*a
 }
 
 func (f *generateSeriesFunc) Execute(_ context.Context, params []any, opts *catalog.ScanOptions) (array.RecordReader, error) {
-	if len(params) < 2 || len(params) > 3 {
-		return nil, fmt.Errorf("GENERATE_SERIES requires 2 or 3 parameters, got %d", len(params))
-	}
-
 	start, err := toInt64(params[0])
 	if err != nil {
 		return nil, fmt.Errorf("start: %w", err)
@@ -290,7 +286,7 @@ func (f *generateSeriesFunc) Execute(_ context.Context, params []any, opts *cata
 	}
 
 	step := int64(1)
-	if len(params) == 3 {
+	if params[2] != nil {
 		step, err = toInt64(params[2])
 		if err != nil {
 			return nil, fmt.Errorf("step: %w", err)
@@ -346,7 +342,6 @@ func (f *generateRangeFunc) Signature() catalog.FunctionSignature {
 			arrow.PrimitiveTypes.Int64, // column_count
 		},
 		ReturnType: nil, // Table function with dynamic schema
-		Variadic:   false,
 	}
 }
 

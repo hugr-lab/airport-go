@@ -108,6 +108,7 @@ func openDuckDB(t *testing.T) *sql.DB {
 
 // connectToFlightServer attaches a Flight server to DuckDB.
 // Returns the attachment name for use in queries.
+//
 //nolint:unparam
 func connectToFlightServer(t *testing.T, db *sql.DB, address string, token string) string {
 	t.Helper()

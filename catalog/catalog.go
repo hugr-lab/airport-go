@@ -11,6 +11,9 @@ import (
 	"context"
 )
 
+// DefaultSchemaName is the default schema name used in Airport catalogs.
+const DefaultSchemaName = "main"
+
 // Catalog represents the top-level metadata container.
 // Implementations can be static (from builder) or dynamic (user-provided).
 // All methods MUST be goroutine-safe.

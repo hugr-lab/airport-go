@@ -26,6 +26,7 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -143,8 +144,9 @@ func (t *TimeTravelUsersTable) Name() string { return "users" }
 func (t *TimeTravelUsersTable) Comment() string {
 	return "Users table with time travel support (versions 1-3)"
 }
+
 func (t *TimeTravelUsersTable) ArrowSchema(columns []string) *arrow.Schema {
-	return catalog.ProjectSchema(t.schema, columns)
+	return t.schema
 }
 
 func (t *TimeTravelUsersTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
@@ -165,14 +167,11 @@ func (t *TimeTravelUsersTable) Scan(ctx context.Context, opts *catalog.ScanOptio
 		return nil, fmt.Errorf("version %d not found (available: 1-3)", version)
 	}
 
-	// Handle column projection
-	outputSchema, columnIndices := t.projectColumns(opts)
-
 	fmt.Printf("[TimeTravelTable] Query version=%d, columns=%v\n", version, getColumnNames(opts))
 
 	// Build record with projected columns
-	record := t.buildRecord(outputSchema, data, columnIndices)
-	return array.NewRecordReader(outputSchema, []arrow.RecordBatch{record})
+	record := t.buildRecord(t.schema, data, opts.Columns)
+	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }
 
 // DynamicSchemaTable interface implementation
@@ -180,68 +179,27 @@ func (t *TimeTravelUsersTable) Scan(ctx context.Context, opts *catalog.ScanOptio
 
 //nolint:unparam // error return required by interface
 func (t *TimeTravelUsersTable) SchemaForRequest(_ context.Context, req *catalog.SchemaRequest) (*arrow.Schema, error) {
-	// If specific columns requested, return projected schema
-	if req != nil && len(req.Columns) > 0 {
-		outputSchema, _ := t.projectColumnsFromList(req.Columns)
-		return outputSchema, nil
-	}
+	// here you can adjust schema based on req.Parameters or req.TimePoint if needed
 	return t.schema, nil
 }
 
 // Helper methods
-
-func (t *TimeTravelUsersTable) projectColumns(opts *catalog.ScanOptions) (*arrow.Schema, []int) {
-	if opts == nil || len(opts.Columns) == 0 {
-		// Return all columns
-		indices := make([]int, t.schema.NumFields())
-		for i := range indices {
-			indices[i] = i
-		}
-		return t.schema, indices
-	}
-	return t.projectColumnsFromList(opts.Columns)
-}
-
-func (t *TimeTravelUsersTable) projectColumnsFromList(columns []string) (*arrow.Schema, []int) {
-	// Build column name to index map
-	colIndex := make(map[string]int)
-	for i := 0; i < t.schema.NumFields(); i++ {
-		colIndex[t.schema.Field(i).Name] = i
-	}
-
-	// Select only requested columns
-	var fields []arrow.Field
-	var indices []int
-	for _, col := range columns {
-		if idx, ok := colIndex[col]; ok {
-			fields = append(fields, t.schema.Field(idx))
-			indices = append(indices, idx)
-		}
-	}
-
-	if len(fields) == 0 {
-		// Fallback to all columns if none matched
-		indices = make([]int, t.schema.NumFields())
-		for i := range indices {
-			indices[i] = i
-		}
-		return t.schema, indices
-	}
-
-	return arrow.NewSchema(fields, nil), indices
-}
-
-func (t *TimeTravelUsersTable) buildRecord(schema *arrow.Schema, data [][]any, columnIndices []int) arrow.RecordBatch {
+func (t *TimeTravelUsersTable) buildRecord(schema *arrow.Schema, data [][]any, columns []string) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(t.alloc, schema)
 	defer builder.Release()
 
-	for _, row := range data {
-		for outIdx, srcIdx := range columnIndices {
-			switch v := row[srcIdx].(type) {
+	for i, field := range builder.Fields() {
+		if columns != nil && !slices.Contains(columns, schema.Field(i).Name) {
+			// fill empty values for unselected columns
+			field.AppendEmptyValues(len(data))
+			continue
+		}
+		for _, row := range data {
+			switch v := row[i].(type) {
 			case int64:
-				builder.Field(outIdx).(*array.Int64Builder).Append(v)
+				field.(*array.Int64Builder).Append(v)
 			case string:
-				builder.Field(outIdx).(*array.StringBuilder).Append(v)
+				field.(*array.StringBuilder).Append(v)
 			}
 		}
 	}

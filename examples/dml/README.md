@@ -73,38 +73,35 @@ SELECT * FROM demo.test.users;
 
 ### Transaction Support
 
-```sql
--- Start a transaction
-BEGIN TRANSACTION;
+The transaction in the DuckDB works differently than traditional databases.
+(See the documentation for more details: <https://airport.query.farm/transactions.html>)
 
+If a DML operation returns an error, the entire transaction is rolled back automatically, in otherwise it will be committed. The DuckDB client manages the transaction state, but not interacts with the airport backend for COMMIT/ROLLBACK commands.
+
+You can get current transaction ID from the context in the table methods and use it to track the changes made within the transaction.
+
+```go
+txId, ok := catalog.TransactionIDFromContext(ctx)
+```
+
+```sql
 -- Insert data within transaction
-INSERT INTO demo.test.users (id, name, email) VALUES (100, 'TxUser', 'tx@example.com');
+INSERT INTO demo.test.users (id, name, email) 
+VALUES (100, 'TxUser', 'tx@example.com');
 
 -- Data is visible within the transaction
 SELECT * FROM demo.test.users;
 
--- Rollback discards changes
-ROLLBACK;
+-- Duplicate ID to cause error
+INSERT INTO demo.test.users (id, name, email) 
+VALUES 
+    (101, 'TxUser2', 'tx@example.com'),
+    (101, 'Duplicate', 'tx@example.com');
 
--- TxUser is gone
+-- TxUser2 is gone
 SELECT * FROM demo.test.users;
 ```
 
-### Transaction with Commit
-
-```sql
--- Start a transaction
-BEGIN TRANSACTION;
-
--- Make changes
-INSERT INTO demo.test.users (id, name, email) VALUES (200, 'Committed', 'commit@example.com');
-
--- Commit persists changes
-COMMIT;
-
--- Data is permanent
-SELECT * FROM demo.test.users;
-```
 
 ## Implementation Details
 

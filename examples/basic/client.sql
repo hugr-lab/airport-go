@@ -11,7 +11,7 @@ CREATE OR REPLACE SECRET airport_secret (
     scope 'grpc://localhost:50051'
 );
 
-ATTACH '' AS airport_catalog (TYPE airport, SECRET airport_secret, LOCATION 'grpc://localhost:50051');
+ATTACH '' AS airport_catalog (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- Query the users table
 SELECT * FROM airport_catalog.demo.users;

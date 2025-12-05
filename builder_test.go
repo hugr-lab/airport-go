@@ -362,7 +362,6 @@ func (m *mockScalarFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.PrimitiveTypes.Int64},
 		ReturnType: arrow.PrimitiveTypes.Int64,
-		Variadic:   false,
 	}
 }
 
@@ -387,7 +386,6 @@ func (m *mockTableFunc) Signature() catalog.FunctionSignature {
 	return catalog.FunctionSignature{
 		Parameters: []arrow.DataType{arrow.BinaryTypes.String},
 		ReturnType: nil, // Table functions don't have scalar return type
-		Variadic:   false,
 	}
 }
 

@@ -9,7 +9,10 @@ import (
 
 // ScanOptions provides options for table scans.
 type ScanOptions struct {
-	// Columns to return. If nil/empty, return all columns.
+	// Columns to return. If nil/empty, all columns are projected.
+	// The server should return a full schema, the projection is handled by duckdb.
+	// The server may use this information for optimization.
+	// The unselected columns can contain nulls or default values in the returned arrays.
 	Columns []string
 
 	// Filter contains a serialized JSON predicate expression from DuckDB.
@@ -74,11 +77,14 @@ type SchemaRequest struct {
 	Parameters []any
 
 	// TimePoint for time-travel queries.
-	// Nil for "current" time.
+	// Nil for "current" time (no time travel).
 	TimePoint *TimePoint
 
 	// Columns requested (for projection pushdown).
 	// Nil/empty means all columns.
+	// The server should return a full schema, the projection is handled by duckdb.
+	// The server may use this information for optimization.
+	// The unselected columns can contain nulls or default values in the returned arrays.
 	Columns []string
 }
 
@@ -93,6 +99,7 @@ type FunctionSignature struct {
 	ReturnType arrow.DataType
 
 	// Variadic indicates if last parameter accepts multiple values.
+	// Do not use: Not implemented yet in the airport extension.
 	Variadic bool
 }
 

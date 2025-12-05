@@ -115,7 +115,10 @@ func TestTableFunctionsInOut(t *testing.T) {
 		}
 		defer rows.Close()
 
-		expected := []struct{ id int64; name string }{
+		expected := []struct {
+			id   int64
+			name string
+		}{
 			{1, "a"},
 			{2, "b"},
 			{3, "c"},
@@ -300,7 +303,6 @@ func (f *filterRowsFunc) Signature() catalog.FunctionSignature {
 			arrow.Null, // Table input parameter (type doesn't matter, marked by is_table_type metadata)
 		},
 		ReturnType: nil, // Table function
-		Variadic:   false,
 	}
 }
 
@@ -334,7 +336,6 @@ func (f *multiplyColumnFunc) Signature() catalog.FunctionSignature {
 			arrow.Null,                 // Table input parameter (marked by is_table_type metadata)
 		},
 		ReturnType: nil,
-		Variadic:   false,
 	}
 }
 
@@ -515,7 +516,6 @@ func (f *generateSeriesFunc) Signature() catalog.FunctionSignature {
 			arrow.PrimitiveTypes.Int64, // stop
 		},
 		ReturnType: nil,
-		Variadic:   false,
 	}
 }
 
@@ -568,7 +568,6 @@ func (f *generateRangeFunc) Signature() catalog.FunctionSignature {
 			arrow.PrimitiveTypes.Int64, // column_count
 		},
 		ReturnType: nil,
-		Variadic:   false,
 	}
 }
 

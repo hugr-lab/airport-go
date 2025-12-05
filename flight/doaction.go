@@ -141,8 +141,7 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 			"serialized": serializedContents, // Inline serialized FlightInfo data
 		}
 
-		// Mark "some_schema" as default (first schema is default)
-		isDefault := len(schemaObjects) == 0 // First schema is default
+		isDefault := schema.Name() == catalog.DefaultSchemaName // First schema is default
 
 		schemaObj := map[string]interface{}{
 			"name":        schema.Name(), // C++ code uses schema.name

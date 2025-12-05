@@ -10,7 +10,7 @@ import (
 )
 
 // TransactionIDHeader is the gRPC metadata key for transaction ID.
-const TransactionIDHeader = "x-transaction-id"
+const TransactionIDHeader = "airport-transaction-id"
 
 // txKey is the unexported context key for transaction ID.
 type txKey struct{}

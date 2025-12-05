@@ -57,7 +57,7 @@ LOAD airport;
 ATTACH '' AS funcs (TYPE airport, LOCATION 'grpc://localhost:50051');
 
 -- Generate series 1-5
-SELECT * FROM funcs.functions_demo.GENERATE_SERIES(1, 5);
+SELECT * FROM funcs.functions_demo.GENERATE_SERIES(1, 5, 1);
 
 -- Generate table with 3 columns
 SELECT * FROM funcs.functions_demo.GENERATE_RANGE(1, 5, 3);
