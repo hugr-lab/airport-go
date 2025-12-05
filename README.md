@@ -66,7 +66,7 @@ func main() {
 
     // Build catalog
     cat, _ := airport.NewCatalogBuilder().
-        Schema("main").
+        Schema("test").
             SimpleTable(airport.SimpleTableDef{
                 Name:     "users",
                 Comment:  "User accounts",
@@ -109,7 +109,7 @@ LOAD airport;
 ATTACH '' AS my_server (TYPE AIRPORT, LOCATION 'grpc://localhost:50051');
 
 -- Query the users table
-SELECT * FROM my_server.main.users;
+SELECT * FROM my_server.test.users;
 ```
 
 Expected output:
@@ -230,13 +230,13 @@ CREATE SCHEMA demo.analytics;
 DROP SCHEMA demo.analytics;
 
 -- Table operations
-CREATE TABLE demo.main.users (id INTEGER, name VARCHAR);
-ALTER TABLE demo.main.users ADD COLUMN email VARCHAR;
-ALTER TABLE demo.main.users RENAME COLUMN name TO full_name;
-DROP TABLE demo.main.users;
+CREATE TABLE demo.test.users (id INTEGER, name VARCHAR);
+ALTER TABLE demo.test.users ADD COLUMN email VARCHAR;
+ALTER TABLE demo.test.users RENAME COLUMN name TO full_name;
+DROP TABLE demo.test.users;
 
 -- CREATE TABLE AS SELECT (requires InsertableTable)
-CREATE TABLE demo.main.backup AS SELECT * FROM demo.main.users;
+CREATE TABLE demo.test.backup AS SELECT * FROM demo.test.users;
 ```
 
 See [examples/ddl](examples/ddl/) for a complete implementation.

@@ -53,7 +53,7 @@ func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, p
 					Ticket: ticketBytes,
 				},
 				Location: []*flight.Location{
-					{Uri: fmt.Sprintf("grpc://%s", s.address)},
+					{Uri: s.address},
 				},
 			},
 		},

@@ -482,13 +482,7 @@ func (s *Server) sendEndpointResponse(schemaName, tableName string, ticket []byt
 	}
 
 	// Add location if server address is configured
-	if s.address != "" {
-		endpoint.Location = []*flight.Location{
-			{
-				Uri: "grpc://" + s.address,
-			},
-		}
-	}
+	endpoint.Location = []*flight.Location{{Uri: s.address}}
 
 	// Serialize FlightEndpoint as protobuf
 	endpointBytes, err := proto.Marshal(endpoint)

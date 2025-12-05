@@ -3,6 +3,7 @@ package flight
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow/flight"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -19,7 +20,7 @@ type Server struct {
 	catalog   catalog.Catalog
 	allocator memory.Allocator
 	logger    *slog.Logger
-	address   string // Server's public address for FlightEndpoint locations
+	address   string                     // Server's public address for FlightEndpoint locations
 	txManager catalog.TransactionManager // Optional transaction coordinator
 }
 
@@ -27,6 +28,12 @@ type Server struct {
 // The logger is used for internal logging of errors and important events.
 // The address parameter specifies the server's public address for FlightEndpoint locations.
 func NewServer(cat catalog.Catalog, allocator memory.Allocator, logger *slog.Logger, address string) *Server {
+	switch {
+	case address == "":
+		address = flight.LocationReuseConnection
+	case !strings.HasPrefix(address, "grpc://") && !strings.HasPrefix(address, "grpc+tls://"):
+		address = "grpc://" + address
+	}
 	return &Server{
 		catalog:   cat,
 		allocator: allocator,
