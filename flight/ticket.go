@@ -39,6 +39,9 @@ type TicketData struct {
 
 	// Columns to project (optional, nil means all columns)
 	Columns []string `json:"columns,omitempty"`
+
+	// Filters to apply (optional)
+	Filters []byte `json:"filters,omitempty"`
 }
 
 // EncodeTicket creates an opaque ticket from schema and table names.
@@ -111,6 +114,7 @@ func DecodeTicket(ticketBytes []byte) (*TicketData, error) {
 func (td *TicketData) ToScanOptions() *catalog.ScanOptions {
 	opts := &catalog.ScanOptions{
 		Columns: td.Columns,
+		Filter:  td.Filters,
 	}
 
 	// Convert time point parameters to TimePoint

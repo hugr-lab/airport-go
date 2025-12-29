@@ -1,5 +1,5 @@
 // Package msgpack provides MessagePack encoding/decoding for Flight parameters.
-// Used by DoPut RPC to deserialize query parameters.
+// Used by DoExchange RPC to deserialize query parameters.
 package msgpack
 
 import (
@@ -50,34 +50,4 @@ func Encode(v interface{}) ([]byte, error) {
 	}
 
 	return data, nil
-}
-
-// DecodeMap deserializes MessagePack data into a map[string]interface{}.
-// This is useful when the structure is not known at compile time.
-func DecodeMap(data []byte) (map[string]interface{}, error) {
-	if len(data) == 0 {
-		return nil, fmt.Errorf("empty MessagePack data")
-	}
-
-	var result map[string]interface{}
-	if err := msgpack.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode MessagePack map: %w", err)
-	}
-
-	return result, nil
-}
-
-// DecodeSlice deserializes MessagePack data into a []interface{}.
-// This is useful for positional parameters.
-func DecodeSlice(data []byte) ([]interface{}, error) {
-	if len(data) == 0 {
-		return nil, fmt.Errorf("empty MessagePack data")
-	}
-
-	var result []interface{}
-	if err := msgpack.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode MessagePack slice: %w", err)
-	}
-
-	return result, nil
 }

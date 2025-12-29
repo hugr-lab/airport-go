@@ -276,12 +276,6 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		return status.Errorf(codes.NotFound, "table '%s.%s' not found", schemaName, tableName)
 	}
 
-	// Check if table supports UPDATE
-	updatableTable, ok := table.(catalog.UpdatableTable)
-	if !ok {
-		return status.Errorf(codes.FailedPrecondition, "table '%s' does not support UPDATE operations", tableName)
-	}
-
 	// Create record reader from stream directly
 	inputReader, err := flight.NewRecordReader(stream, ipc.WithAllocator(s.allocator))
 	if errors.Is(err, io.EOF) {
@@ -292,30 +286,25 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 	}
 
 	inputSchema := inputReader.Schema()
-	s.logger.Debug("Created record reader for UPDATE",
-		"input_schema", inputSchema,
-	)
 
-	// Find the rowid column in the input schema
-	rowidColIdx := -1
-	for i := 0; i < inputSchema.NumFields(); i++ {
-		field := inputSchema.Field(i)
-		if field.Name == "rowid" {
-			rowidColIdx = i
-			break
-		}
-		if md := field.Metadata; md.Len() > 0 {
-			if idx := md.FindKey("is_rowid"); idx >= 0 && md.Values()[idx] != "" {
-				rowidColIdx = i
-				break
-			}
-		}
-	}
-
+	// Find the rowid column in the input schema using catalog helper
+	rowidColIdx := catalog.FindRowIDColumn(inputSchema)
 	if rowidColIdx == -1 {
 		inputReader.Release()
 		return status.Errorf(codes.InvalidArgument, "UPDATE requires rowid column in input schema")
 	}
+
+	// Create update processor: prefer batch interface over legacy
+	updateBatch, usingBatch := s.newUpdateProcessor(table, rowidColIdx)
+	if updateBatch == nil {
+		inputReader.Release()
+		return status.Errorf(codes.FailedPrecondition, "table '%s' does not support UPDATE operations", tableName)
+	}
+
+	s.logger.Debug("Created record reader for UPDATE",
+		"input_schema", inputSchema,
+		"using_batch_interface", usingBatch,
+	)
 
 	// For UPDATE, the output schema must match the input schema that DuckDB expects
 	// DuckDB sends [updated_cols..., id, rowid] and expects the same schema back
@@ -382,84 +371,25 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 	}()
 
 	// Processor goroutine: updates data per-batch and produces RETURNING batches
-	// This processes incrementally to avoid deadlock - each batch is updated
-	// and RETURNING data is sent before waiting for more input
 	eg.Go(func() error {
 		defer close(outputCh)
 
 		for batch := range inputCh {
 			totalRows += batch.NumRows()
 
-			// Extract rowids from this batch
-			rowidCol := batch.Column(rowidColIdx)
-			rowIDsFromBatch, err := extractRowIDs(rowidCol)
-			if err != nil {
-				batch.Release()
-				return err
-			}
-
-			// Strip rowid column from batch to create data record
-			dataRecords := stripRowIDColumn([]arrow.RecordBatch{batch}, rowidColIdx)
+			// Execute UPDATE using selected strategy
+			dmlResult, updateErr := updateBatch(egCtx, batch, opts)
 			batch.Release()
-
-			if len(dataRecords) == 0 {
-				continue
-			}
-
-			// Create RecordReader for this single batch
-			recordReader, err := array.NewRecordReader(dataRecords[0].Schema(), dataRecords)
-			if err != nil {
-				for _, r := range dataRecords {
-					r.Release()
-				}
-				return err
-			}
-
-			// Execute UPDATE for this batch with transaction handling
-			var dmlResult *catalog.DMLResult
-			updateErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
-				var err error
-				dmlResult, err = updatableTable.Update(txCtx, rowIDsFromBatch, recordReader, opts)
-				return err
-			})
-
-			// Release data records after update
-			for _, r := range dataRecords {
-				r.Release()
-			}
 
 			if updateErr != nil {
 				return updateErr
 			}
 
-			// Send RETURNING data through output channel if requested
-			if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
-				s.logger.Debug("Processing UPDATE RETURNING data")
-				for dmlResult.ReturningData.Next() {
-					outBatch := dmlResult.ReturningData.RecordBatch()
-					s.logger.Debug("Sending UPDATE RETURNING batch to channel",
-						"rows", outBatch.NumRows(),
-					)
-					outBatch.Retain()
-
-					select {
-					case outputCh <- outBatch:
-						s.logger.Debug("Sent UPDATE RETURNING batch to channel")
-					case <-egCtx.Done():
-						outBatch.Release()
-						return egCtx.Err()
-					}
-				}
-				if err := dmlResult.ReturningData.Err(); err != nil {
-					s.logger.Error("RETURNING data reader error", "error", err)
-					return err
-				}
-				s.logger.Debug("Finished processing UPDATE RETURNING data")
+			// Send RETURNING data through output channel
+			if err := sendReturningData(egCtx, dmlResult, returnData, outputCh); err != nil {
+				return err
 			}
-			s.logger.Debug("UPDATE batch processing complete, waiting for next batch")
 		}
-
-		s.logger.Debug("UPDATE processor completed")
 		return nil
 	})
 
@@ -544,12 +474,6 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		return status.Errorf(codes.NotFound, "table '%s.%s' not found", schemaName, tableName)
 	}
 
-	// Check if table supports DELETE
-	deletableTable, ok := table.(catalog.DeletableTable)
-	if !ok {
-		return status.Errorf(codes.FailedPrecondition, "table '%s' does not support DELETE operations", tableName)
-	}
-
 	// Create record reader from stream directly
 	inputReader, err := flight.NewRecordReader(stream, ipc.WithAllocator(s.allocator))
 	if errors.Is(err, io.EOF) {
@@ -559,8 +483,16 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		return status.Errorf(codes.Internal, "failed to create input record reader: %v", err)
 	}
 
+	// Create delete processor: prefer batch interface over legacy
+	deleteBatch, usingBatch := s.newDeleteProcessor(table)
+	if deleteBatch == nil {
+		inputReader.Release()
+		return status.Errorf(codes.FailedPrecondition, "table '%s' does not support DELETE operations", tableName)
+	}
+
 	s.logger.Debug("Created record reader for DELETE",
 		"input_schema", inputReader.Schema(),
+		"using_batch_interface", usingBatch,
 	)
 
 	// Determine output schema for RETURNING data
@@ -627,8 +559,6 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 	}()
 
 	// Processor goroutine: deletes data per-batch and produces RETURNING batches
-	// This processes incrementally to avoid deadlock - each batch is deleted
-	// and RETURNING data is sent before waiting for more input
 	eg.Go(func() error {
 		defer close(outputCh)
 
@@ -640,49 +570,19 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 				continue
 			}
 
-			// The first column should be rowid
-			rowidCol := batch.Column(0)
-			rowIDsFromBatch, err := extractRowIDs(rowidCol)
+			// Execute DELETE using selected strategy
+			dmlResult, deleteErr := deleteBatch(egCtx, batch, opts)
 			batch.Release()
-			if err != nil {
-				return err
-			}
-
-			if len(rowIDsFromBatch) == 0 {
-				continue
-			}
-
-			// Execute DELETE for this batch with transaction handling
-			var dmlResult *catalog.DMLResult
-			deleteErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
-				var err error
-				dmlResult, err = deletableTable.Delete(txCtx, rowIDsFromBatch, opts)
-				return err
-			})
 
 			if deleteErr != nil {
 				return deleteErr
 			}
 
-			// Send RETURNING data through output channel if requested
-			if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
-				for dmlResult.ReturningData.Next() {
-					outBatch := dmlResult.ReturningData.RecordBatch()
-					outBatch.Retain()
-
-					select {
-					case outputCh <- outBatch:
-					case <-egCtx.Done():
-						outBatch.Release()
-						return egCtx.Err()
-					}
-				}
-				if err := dmlResult.ReturningData.Err(); err != nil {
-					return err
-				}
+			// Send RETURNING data through output channel
+			if err := sendReturningData(egCtx, dmlResult, returnData, outputCh); err != nil {
+				return err
 			}
 		}
-
 		return nil
 	})
 
@@ -895,4 +795,133 @@ func stripRowIDColumn(records []arrow.RecordBatch, rowidColIdx int) []arrow.Reco
 	}
 
 	return result
+}
+
+// batchProcessor is a function that processes a single batch for DML operations.
+// It returns the DML result and any error that occurred.
+type batchProcessor func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error)
+
+// newUpdateProcessor returns a batch processor for UPDATE operations.
+// Prefers batch interface over legacy. Returns nil if neither is supported.
+func (s *Server) newUpdateProcessor(table catalog.Table, rowidColIdx int) (batchProcessor, bool) {
+	// Prefer batch interface
+	if batchTable, ok := table.(catalog.UpdatableBatchTable); ok {
+		return func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+			batchReader, err := array.NewRecordReader(batch.Schema(), []arrow.RecordBatch{batch})
+			if err != nil {
+				return nil, err
+			}
+
+			var result *catalog.DMLResult
+			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
+				var err error
+				result, err = batchTable.Update(txCtx, batchReader, opts)
+				return err
+			})
+			return result, txErr
+		}, true
+	}
+
+	// Fall back to legacy interface
+	if legacyTable, ok := table.(catalog.UpdatableTable); ok {
+		return func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+			rowidCol := batch.Column(rowidColIdx)
+			rowIDs, err := extractRowIDs(rowidCol)
+			if err != nil {
+				return nil, err
+			}
+
+			dataRecords := stripRowIDColumn([]arrow.RecordBatch{batch}, rowidColIdx)
+			if len(dataRecords) == 0 {
+				return &catalog.DMLResult{}, nil
+			}
+			defer func() {
+				for _, r := range dataRecords {
+					r.Release()
+				}
+			}()
+
+			recordReader, err := array.NewRecordReader(dataRecords[0].Schema(), dataRecords)
+			if err != nil {
+				return nil, err
+			}
+
+			var result *catalog.DMLResult
+			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
+				var err error
+				result, err = legacyTable.Update(txCtx, rowIDs, recordReader, opts)
+				return err
+			})
+			return result, txErr
+		}, false
+	}
+
+	return nil, false
+}
+
+// newDeleteProcessor returns a batch processor for DELETE operations.
+// Prefers batch interface over legacy. Returns nil if neither is supported.
+func (s *Server) newDeleteProcessor(table catalog.Table) (batchProcessor, bool) {
+	// Prefer batch interface
+	if batchTable, ok := table.(catalog.DeletableBatchTable); ok {
+		return func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+			batchReader, err := array.NewRecordReader(batch.Schema(), []arrow.RecordBatch{batch})
+			if err != nil {
+				return nil, err
+			}
+
+			var result *catalog.DMLResult
+			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
+				var err error
+				result, err = batchTable.Delete(txCtx, batchReader, opts)
+				return err
+			})
+			return result, txErr
+		}, true
+	}
+
+	// Fall back to legacy interface
+	if legacyTable, ok := table.(catalog.DeletableTable); ok {
+		return func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+			rowidCol := batch.Column(0)
+			rowIDs, err := extractRowIDs(rowidCol)
+			if err != nil {
+				return nil, err
+			}
+
+			if len(rowIDs) == 0 {
+				return &catalog.DMLResult{}, nil
+			}
+
+			var result *catalog.DMLResult
+			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
+				var err error
+				result, err = legacyTable.Delete(txCtx, rowIDs, opts)
+				return err
+			})
+			return result, txErr
+		}, false
+	}
+
+	return nil, false
+}
+
+// sendReturningData sends RETURNING data through the output channel.
+func sendReturningData(ctx context.Context, result *catalog.DMLResult, returnData bool, outputCh chan<- arrow.RecordBatch) error {
+	if !returnData || result == nil || result.ReturningData == nil {
+		return nil
+	}
+
+	for result.ReturningData.Next() {
+		outBatch := result.ReturningData.RecordBatch()
+		outBatch.Retain()
+
+		select {
+		case outputCh <- outBatch:
+		case <-ctx.Done():
+			outBatch.Release()
+			return ctx.Err()
+		}
+	}
+	return result.ReturningData.Err()
 }

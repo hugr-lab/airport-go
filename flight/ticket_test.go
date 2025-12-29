@@ -50,11 +50,11 @@ func TestEncodeDecodeTicket(t *testing.T) {
 
 func TestDecodeTicketWithTimePoint(t *testing.T) {
 	tests := []struct {
-		name          string
-		json          string
-		wantUnit      string
-		wantValue     string
-		wantError     bool
+		name      string
+		json      string
+		wantUnit  string
+		wantValue string
+		wantError bool
 	}{
 		{
 			name:      "no time point",

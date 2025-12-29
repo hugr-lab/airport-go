@@ -72,4 +72,3 @@ func TestListSchemas(t *testing.T) {
 		t.Errorf("expected EOF after result, got %v", err)
 	}
 }
-

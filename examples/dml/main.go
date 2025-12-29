@@ -214,6 +214,11 @@ func (m *InMemoryTransactionManager) GetTransactionStatus(_ context.Context, txI
 // UsersTable is an in-memory table that supports full DML operations.
 // It implements catalog.Table, catalog.InsertableTable, catalog.UpdatableTable,
 // and catalog.DeletableTable interfaces.
+//
+// Alternative: You can implement catalog.UpdatableBatchTable and catalog.DeletableBatchTable
+// instead (or in addition). The batch interfaces receive rowid embedded in the RecordReader
+// rather than as a separate []int64 slice. Use catalog.FindRowIDColumn(rows.Schema())
+// to locate the rowid column. Batch interfaces are preferred when both are implemented.
 type UsersTable struct {
 	schema    *arrow.Schema
 	alloc     memory.Allocator
