@@ -53,7 +53,7 @@ type DynamicSchemaTable interface {
 }
 
 // InsertableTable extends Table with INSERT capability.
-// Tables implement this interface to accept new rows via DoPut.
+// Tables implement this interface to accept new rows via DoExchange.
 // Implementations MUST be goroutine-safe.
 type InsertableTable interface {
 	Table
@@ -99,6 +99,50 @@ type DeletableTable interface {
 	// Returns DMLResult with affected row count and optional returning data.
 	// Context may contain transaction ID for coordinated operations.
 	Delete(ctx context.Context, rowIDs []int64, opts *DMLOptions) (*DMLResult, error)
+}
+
+// UpdatableBatchTable extends Table with batch-oriented UPDATE capability.
+// The Update method receives the complete input RecordReader including the rowid column.
+// Implementations extract rowid values from the rowid column in the RecordReader.
+// This interface is preferred over UpdatableTable when both are implemented.
+// Implementations MUST be goroutine-safe.
+type UpdatableBatchTable interface {
+	Table
+
+	// Update modifies existing rows using data from the RecordReader.
+	// The rows RecordReader contains both the rowid column (identifying rows to update)
+	// and the new column values. Implementations MUST extract rowid values from
+	// the rowid column (identified by name "rowid" or metadata key "is_rowid").
+	// Use FindRowIDColumn(rows.Schema()) to locate the rowid column.
+	// Row order in RecordReader determines update order.
+	// The opts parameter provides options including RETURNING clause information:
+	//   - opts.Returning: true if RETURNING clause was specified
+	//   - opts.ReturningColumns: column names to include in RETURNING results
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	// Caller MUST call rows.Release() after Update returns.
+	Update(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
+}
+
+// DeletableBatchTable extends Table with batch-oriented DELETE capability.
+// The Delete method receives a RecordReader containing the rowid column.
+// Implementations extract rowid values from the rowid column in the RecordReader.
+// This interface is preferred over DeletableTable when both are implemented.
+// Implementations MUST be goroutine-safe.
+type DeletableBatchTable interface {
+	Table
+
+	// Delete removes rows identified by rowid values in the RecordReader.
+	// The rows RecordReader contains the rowid column (identified by name "rowid"
+	// or metadata key "is_rowid") that identifies rows to delete.
+	// Use FindRowIDColumn(rows.Schema()) to locate the rowid column.
+	// The opts parameter provides options including RETURNING clause information:
+	//   - opts.Returning: true if RETURNING clause was specified
+	//   - opts.ReturningColumns: column names to include in RETURNING results
+	// Returns DMLResult with affected row count and optional returning data.
+	// Context may contain transaction ID for coordinated operations.
+	// Caller MUST call rows.Release() after Delete returns.
+	Delete(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
 }
 
 // ColumnStats contains statistics for a single table column.

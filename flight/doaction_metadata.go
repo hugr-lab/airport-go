@@ -387,8 +387,9 @@ func (s *Server) resolveTableFunctionColumns(ctx context.Context, schemaName, fu
 // createTableTicket creates a ticket for regular table scan.
 func (s *Server) createTableTicket(ctx context.Context, schemaName, tableName string, request *endpointsRequest) ([]byte, error) {
 	ticketData := TicketData{
-		Schema: schemaName,
-		Table:  tableName,
+		Schema:  schemaName,
+		Table:   tableName,
+		Filters: []byte(request.Parameters.JsonFilters),
 	}
 
 	ticketData.Columns = s.resolveTableColumns(ctx, schemaName, tableName, request.Parameters.ColumnIDs)

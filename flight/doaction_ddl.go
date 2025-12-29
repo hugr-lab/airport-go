@@ -26,7 +26,7 @@ type CreateSchemaParams struct {
 
 // DropSchemaParams for drop_schema action.
 type DropSchemaParams struct {
-	Type           string `msgpack:"type"`            // Always "schema"
+	Type           string `msgpack:"type"` // Always "schema"
 	CatalogName    string `msgpack:"catalog_name"`
 	SchemaName     string `msgpack:"schema_name"`
 	Name           string `msgpack:"name"`
@@ -47,7 +47,7 @@ type CreateTableParams struct {
 
 // DropTableParams for drop_table action.
 type DropTableParams struct {
-	Type           string `msgpack:"type"`            // Always "table"
+	Type           string `msgpack:"type"` // Always "table"
 	CatalogName    string `msgpack:"catalog_name"`
 	SchemaName     string `msgpack:"schema_name"`
 	Name           string `msgpack:"name"`
@@ -58,7 +58,7 @@ type DropTableParams struct {
 type AddColumnParams struct {
 	Catalog           string `msgpack:"catalog"`
 	Schema            string `msgpack:"schema"`
-	Name              string `msgpack:"name"` // Table name
+	Name              string `msgpack:"name"`          // Table name
 	ColumnSchema      []byte `msgpack:"column_schema"` // IPC serialized Arrow schema with single field
 	IgnoreNotFound    bool   `msgpack:"ignore_not_found"`
 	IfColumnNotExists bool   `msgpack:"if_column_not_exists"`
@@ -136,8 +136,8 @@ type SetDefaultParams struct {
 type AddFieldParams struct {
 	Catalog          string `msgpack:"catalog"`
 	Schema           string `msgpack:"schema"`
-	Name             string `msgpack:"name"`               // Table name
-	ColumnSchema     []byte `msgpack:"column_schema"`      // IPC serialized Arrow schema with field path and type
+	Name             string `msgpack:"name"`                // Table name
+	ColumnSchema     []byte `msgpack:"column_schema"`       // IPC serialized Arrow schema with field path and type
 	IfFieldNotExists bool   `msgpack:"if_field_not_exists"` // Conditional field addition
 	IgnoreNotFound   bool   `msgpack:"ignore_not_found"`
 }
@@ -1564,4 +1564,3 @@ func (s *Server) buildTableFlightInfo(_ context.Context, schema catalog.Schema, 
 
 	return flightInfo, nil
 }
-

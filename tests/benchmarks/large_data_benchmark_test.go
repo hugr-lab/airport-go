@@ -352,8 +352,10 @@ type largeDataTable struct {
 	rowCount int
 }
 
-func (t *largeDataTable) Name() string    { return t.name }
-func (t *largeDataTable) Comment() string { return fmt.Sprintf("Large data table with %d rows", t.rowCount) }
+func (t *largeDataTable) Name() string { return t.name }
+func (t *largeDataTable) Comment() string {
+	return fmt.Sprintf("Large data table with %d rows", t.rowCount)
+}
 
 func (t *largeDataTable) ArrowSchema(cols []string) *arrow.Schema {
 	if len(cols) == 0 {
@@ -386,11 +388,11 @@ type largeDataReader struct {
 	current    arrow.RecordBatch
 }
 
-func (r *largeDataReader) Schema() *arrow.Schema           { return r.schema }
-func (r *largeDataReader) Record() arrow.RecordBatch       { return r.current }
-func (r *largeDataReader) RecordBatch() arrow.RecordBatch  { return r.current }
-func (r *largeDataReader) Err() error                 { return nil }
-func (r *largeDataReader) Retain()                    {}
+func (r *largeDataReader) Schema() *arrow.Schema          { return r.schema }
+func (r *largeDataReader) Record() arrow.RecordBatch      { return r.current }
+func (r *largeDataReader) RecordBatch() arrow.RecordBatch { return r.current }
+func (r *largeDataReader) Err() error                     { return nil }
+func (r *largeDataReader) Retain()                        {}
 func (r *largeDataReader) Release() {
 	if r.current != nil {
 		r.current.Release()

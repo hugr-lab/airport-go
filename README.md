@@ -284,6 +284,10 @@ The package follows an interface-based design:
 - **DynamicCatalog**: Extends Catalog with CREATE/DROP SCHEMA
 - **DynamicSchema**: Extends Schema with CREATE/DROP/RENAME TABLE
 - **DynamicTable**: Extends Table with ADD/DROP/RENAME COLUMN
+- **DML Interfaces**:
+  - `InsertableTable`: INSERT operations
+  - `UpdatableTable`/`UpdatableBatchTable`: UPDATE operations (batch interface recommended)
+  - `DeletableTable`/`DeletableBatchTable`: DELETE operations (batch interface recommended)
 
 You can either:
 - Use `NewCatalogBuilder()` for static catalogs (quickest)

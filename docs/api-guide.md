@@ -227,6 +227,94 @@ type DeletableTable interface {
 }
 ```
 
+### catalog.UpdatableBatchTable
+
+Alternative UPDATE interface where the rowid column is embedded in the RecordReader.
+This interface is preferred over `UpdatableTable` when both are implemented.
+
+```go
+type UpdatableBatchTable interface {
+    Table
+
+    // Update modifies existing rows using data from the RecordReader.
+    // The rows RecordReader contains both the rowid column (identifying rows to update)
+    // and the new column values. Implementations MUST extract rowid values from
+    // the rowid column (identified by name "rowid" or metadata key "is_rowid").
+    // Use FindRowIDColumn(rows.Schema()) to locate the rowid column.
+    // Row order in RecordReader determines update order.
+    // opts contains RETURNING clause information.
+    // Returns DMLResult with affected row count and optional returning data.
+    // Caller MUST call rows.Release() after Update returns.
+    Update(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
+}
+```
+
+### catalog.DeletableBatchTable
+
+Alternative DELETE interface where the rowid column is embedded in the RecordReader.
+This interface is preferred over `DeletableTable` when both are implemented.
+
+```go
+type DeletableBatchTable interface {
+    Table
+
+    // Delete removes rows identified by rowid values in the RecordReader.
+    // The rows RecordReader contains the rowid column (identified by name "rowid"
+    // or metadata key "is_rowid") that identifies rows to delete.
+    // Use FindRowIDColumn(rows.Schema()) to locate the rowid column.
+    // opts contains RETURNING clause information.
+    // Returns DMLResult with affected row count and optional returning data.
+    // Caller MUST call rows.Release() after Delete returns.
+    Delete(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
+}
+```
+
+### catalog.FindRowIDColumn
+
+Helper function to locate the rowid column in a schema:
+
+```go
+// FindRowIDColumn returns the index of the rowid column in the schema.
+// Returns -1 if no rowid column is found.
+//
+// Rowid column is identified by:
+//   - Column name "rowid" (case-sensitive), or
+//   - Metadata key "is_rowid" with non-empty value
+func FindRowIDColumn(schema *arrow.Schema) int
+```
+
+**Example usage:**
+
+```go
+func (t *MyTable) Update(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+    rowidIdx := catalog.FindRowIDColumn(rows.Schema())
+    if rowidIdx == -1 {
+        return nil, errors.New("rowid column required")
+    }
+
+    var affected int64
+    for rows.Next() {
+        batch := rows.RecordBatch()
+        rowidCol := batch.Column(rowidIdx).(*array.Int64)
+        // Process updates using rowidCol values...
+        affected += batch.NumRows()
+    }
+
+    return &catalog.DMLResult{AffectedRows: affected}, nil
+}
+```
+
+### Choosing Between Legacy and Batch Interfaces
+
+| Interface | rowID Handling | Use Case |
+|-----------|----------------|----------|
+| `UpdatableTable` | rowIDs passed as separate `[]int64` slice | Simpler implementation when rowIDs are processed independently |
+| `UpdatableBatchTable` | rowIDs embedded in RecordReader | When you need access to rowIDs alongside data columns |
+| `DeletableTable` | rowIDs passed as separate `[]int64` slice | Simpler implementation for deletion |
+| `DeletableBatchTable` | rowIDs embedded in RecordReader | When deletion logic needs the full batch context |
+
+**Interface Priority:** When a table implements both legacy and batch interfaces, the batch interface is always preferred.
+
 ### catalog.DMLOptions
 
 Options for DML operations:

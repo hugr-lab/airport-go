@@ -8,6 +8,8 @@ Auto-generated from all feature plans. Last updated: 2025-11-29
 - Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go, ZStandard (004-column-statistics)
 - N/A (storage-agnostic; delegated to user implementations) (004-column-statistics)
 - N/A (library, storage-agnostic) (005-module-reorganization)
+- Go 1.25+ + Apache Arrow Go v18, gRPC, msgpack-go (001-batch-table-interfaces)
+- N/A (storage-agnostic library) (001-batch-table-interfaces)
 
 ## Project Structure
 
@@ -72,9 +74,9 @@ go work sync
 - No silent failures - errors must be handled explicitly
 
 ## Recent Changes
+- 001-batch-table-interfaces: Added Go 1.25+ + Apache Arrow Go v18, gRPC, msgpack-go
 - 006-returning-optimization: Added Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go
 - 005-module-reorganization: Added Go 1.25+
-- 004-column-statistics: Added Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go, ZStandard
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
