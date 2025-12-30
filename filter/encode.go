@@ -52,16 +52,16 @@ func needsQuoting(name string) bool {
 		return true
 	}
 
-	// Check first character
+	// Check first character (must be letter or underscore)
 	c := name[0]
-	if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
+	if !isLetter(c) && c != '_' {
 		return true
 	}
 
-	// Check remaining characters
+	// Check remaining characters (letters, digits, or underscore)
 	for i := 1; i < len(name); i++ {
 		c = name[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+		if !isLetter(c) && !isDigit(c) && c != '_' {
 			return true
 		}
 	}
@@ -81,4 +81,14 @@ func needsQuoting(name string) bool {
 	}
 
 	return false
+}
+
+// isLetter returns true if c is an ASCII letter.
+func isLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// isDigit returns true if c is an ASCII digit.
+func isDigit(c byte) bool {
+	return c >= '0' && c <= '9'
 }
