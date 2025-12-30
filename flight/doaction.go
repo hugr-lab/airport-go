@@ -69,6 +69,8 @@ func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoA
 		return s.handleAddFieldAction(ctx, action, stream)
 	case "rename_field":
 		return s.handleRenameFieldAction(ctx, action, stream)
+	case "remove_field":
+		return s.handleRemoveFieldAction(ctx, action, stream)
 
 	// Catalog version action
 	case "catalog_version":

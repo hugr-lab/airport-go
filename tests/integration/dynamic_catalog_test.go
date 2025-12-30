@@ -544,6 +544,19 @@ func (t *mockDynamicTable) RenameField(_ context.Context, columnPath []string, _
 	return nil
 }
 
+// RemoveField removes a field from a struct-typed column (mock: simplified implementation).
+func (t *mockDynamicTable) RemoveField(_ context.Context, columnPath []string, opts catalog.RemoveFieldOptions) error {
+	// Mock implementation: just return success if path is valid
+	// Real implementation would find the struct column and remove the field
+	if len(columnPath) == 0 {
+		if opts.IgnoreNotFound {
+			return nil
+		}
+		return catalog.ErrNotFound
+	}
+	return nil
+}
+
 // HasColumn checks if a column exists (for testing).
 func (t *mockDynamicTable) HasColumn(name string) bool {
 	t.mu.RLock()

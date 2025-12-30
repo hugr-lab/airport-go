@@ -134,12 +134,13 @@ type SetDefaultParams struct {
 
 // AddFieldParams for add_field action (struct column field addition).
 type AddFieldParams struct {
-	Catalog          string `msgpack:"catalog"`
-	Schema           string `msgpack:"schema"`
-	Name             string `msgpack:"name"`                // Table name
-	ColumnSchema     []byte `msgpack:"column_schema"`       // IPC serialized Arrow schema with field path and type
-	IfFieldNotExists bool   `msgpack:"if_field_not_exists"` // Conditional field addition
-	IgnoreNotFound   bool   `msgpack:"ignore_not_found"`
+	Catalog          string   `msgpack:"catalog"`
+	Schema           string   `msgpack:"schema"`
+	Name             string   `msgpack:"name"`                // Table name
+	ColumnSchema     []byte   `msgpack:"column_schema"`       // IPC serialized Arrow schema with field path and type
+	IfFieldNotExists bool     `msgpack:"if_field_not_exists"` // Conditional field addition
+	IgnoreNotFound   bool     `msgpack:"ignore_not_found"`
+	ColumnPath       []string `msgpack:"column_path"` // Path to source field
 }
 
 // RenameFieldParams for rename_field action (struct column field renaming).
@@ -149,6 +150,15 @@ type RenameFieldParams struct {
 	Name           string   `msgpack:"name"`        // Table name
 	ColumnPath     []string `msgpack:"column_path"` // Path to source field
 	NewName        string   `msgpack:"new_name"`    // Column new name
+	IgnoreNotFound bool     `msgpack:"ignore_not_found"`
+}
+
+// RemoveFieldParams for remove_field action (struct column field removal).
+type RemoveFieldParams struct {
+	Catalog        string   `msgpack:"catalog"`
+	Schema         string   `msgpack:"schema"`
+	Name           string   `msgpack:"name"`        // Table name
+	ColumnPath     []string `msgpack:"column_path"` // Path to source field
 	IgnoreNotFound bool     `msgpack:"ignore_not_found"`
 }
 
@@ -1440,6 +1450,107 @@ func (s *Server) handleRenameFieldAction(ctx context.Context, action *flight.Act
 		"column_path", params.ColumnPath,
 		"new_name", params.NewName,
 	)
+	return nil
+}
+
+// handleRemoveFieldAction implements the remove_field DoAction handler.
+func (s *Server) handleRemoveFieldAction(ctx context.Context, action *flight.Action, stream flight.FlightService_DoActionServer) error {
+	// Decode msgpack parameters
+	var params RemoveFieldParams
+	if err := msgpack.Decode(action.GetBody(), &params); err != nil {
+		s.logger.Error("Failed to decode remove_field parameters", "error", err)
+		return status.Errorf(codes.InvalidArgument, "invalid remove_field payload: %v", err)
+	}
+
+	s.logger.Debug("handleRemoveField called",
+		"catalog", params.Catalog,
+		"schema", params.Schema,
+		"table", params.Name,
+		"column_path", params.ColumnPath,
+	)
+
+	// Validate required fields
+	if params.Schema == "" {
+		return status.Error(codes.InvalidArgument, "schema is required")
+	}
+	if params.Name == "" {
+		return status.Error(codes.InvalidArgument, "table name is required")
+	}
+	if len(params.ColumnPath) == 0 {
+		return status.Error(codes.InvalidArgument, "column_path is required")
+	}
+
+	// Look up schema
+	schema, err := s.catalog.Schema(ctx, params.Schema)
+	if err != nil {
+		s.logger.Error("Failed to get schema", "schema", params.Schema, "error", err)
+		return status.Errorf(codes.Internal, "failed to get schema: %v", err)
+	}
+	if schema == nil {
+		if params.IgnoreNotFound {
+			return nil
+		}
+		return status.Errorf(codes.NotFound, "schema %q not found", params.Schema)
+	}
+
+	// Look up table
+	table, err := schema.Table(ctx, params.Name)
+	if err != nil {
+		s.logger.Error("Failed to get table", "table", params.Name, "error", err)
+		return status.Errorf(codes.Internal, "failed to get table: %v", err)
+	}
+	if table == nil {
+		if params.IgnoreNotFound {
+			return nil
+		}
+		return status.Errorf(codes.NotFound, "table %q not found", params.Name)
+	}
+
+	// Check if table supports dynamic operations
+	dynTable, ok := table.(catalog.DynamicTable)
+	if !ok {
+		return status.Error(codes.Unimplemented, "table does not support column modification")
+	}
+
+	// Build options
+	opts := catalog.RemoveFieldOptions{
+		IgnoreNotFound: params.IgnoreNotFound,
+	}
+
+	// Rename the field
+	err = dynTable.RemoveField(ctx, params.ColumnPath, opts)
+	if errors.Is(err, catalog.ErrNotFound) {
+		return status.Errorf(codes.NotFound, "field path not found")
+	}
+	if err != nil {
+		s.logger.Error("Failed to remove field", "column_path", params.ColumnPath, "error", err)
+		return status.Errorf(codes.Internal, "failed to remove field: %v", err)
+	}
+
+	// Build FlightInfo response with updated schema
+	flightInfo, err := s.buildTableFlightInfo(ctx, schema, table)
+	if err != nil {
+		s.logger.Error("Failed to build FlightInfo", "error", err)
+		return status.Errorf(codes.Internal, "failed to build FlightInfo: %v", err)
+	}
+
+	// Serialize FlightInfo as protobuf
+	flightInfoBytes, err := proto.Marshal(flightInfo)
+	if err != nil {
+		s.logger.Error("Failed to marshal FlightInfo", "error", err)
+		return status.Errorf(codes.Internal, "failed to marshal FlightInfo: %v", err)
+	}
+
+	if err := stream.Send(&flight.Result{Body: flightInfoBytes}); err != nil {
+		s.logger.Error("Failed to send rename_field response", "error", err)
+		return status.Errorf(codes.Internal, "failed to send result: %v", err)
+	}
+
+	s.logger.Debug("handleRemoveField completed",
+		"table", params.Name,
+		"column_path", params.ColumnPath,
+	)
+
 	return nil
 }
 

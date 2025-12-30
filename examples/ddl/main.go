@@ -628,3 +628,16 @@ func (t *DDLTable) RenameField(_ context.Context, columnPath []string, newName s
 	fmt.Printf("[DDLTable:%s] RenameField called: %v -> %s (simplified)\n", t.name, columnPath, newName)
 	return nil
 }
+
+// RemoveField implements catalog.DynamicTable.
+func (t *DDLTable) RemoveField(_ context.Context, columnPath []string, opts catalog.RemoveFieldOptions) error {
+	// Simplified implementation - real implementation would handle nested struct fields
+	if len(columnPath) == 0 {
+		if opts.IgnoreNotFound {
+			return nil
+		}
+		return catalog.ErrNotFound
+	}
+	fmt.Printf("[DDLTable:%s] RemoveField called: %v (simplified)\n", t.name, columnPath)
+	return nil
+}
