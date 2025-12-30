@@ -476,8 +476,8 @@ func (t *batchDMLTable) Insert(ctx context.Context, rows array.RecordReader, opt
 	return result, nil
 }
 
-// Update implements catalog.UpdatableBatchTable - rowid is embedded in RecordReader
-func (t *batchDMLTable) Update(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+// Update implements catalog.UpdatableBatchTable - receives RecordBatch directly
+func (t *batchDMLTable) Update(ctx context.Context, rows arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	start := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -490,6 +490,12 @@ func (t *batchDMLTable) Update(ctx context.Context, rows array.RecordReader, opt
 	rowidColIdx := catalog.FindRowIDColumn(inputSchema)
 	if rowidColIdx == -1 {
 		return nil, fmt.Errorf("rowid column not found in input schema")
+	}
+
+	// Check for null rowids - return error immediately per FR-011
+	rowidCol := rows.Column(rowidColIdx)
+	if rowidCol.NullN() > 0 {
+		return nil, catalog.ErrNullRowID
 	}
 
 	// Build mapping from input column index to table column index (skip rowid)
@@ -507,34 +513,26 @@ func (t *batchDMLTable) Update(ctx context.Context, rows array.RecordReader, opt
 		}
 	}
 
-	// Process updates
+	// Process updates - direct access to RecordBatch (no Next() loop needed)
 	type colUpdate struct {
 		colIdx int
 		value  any
 	}
 	updates := make(map[int64][]colUpdate)
 
-	for rows.Next() {
-		batch := rows.RecordBatch()
-		rowidCol := batch.Column(rowidColIdx).(*array.Int64)
+	rowidArr := rowidCol.(*array.Int64)
+	for batchRowIdx := 0; batchRowIdx < int(rows.NumRows()); batchRowIdx++ {
+		rowID := rowidArr.Value(batchRowIdx)
 
-		for batchRowIdx := 0; batchRowIdx < int(batch.NumRows()); batchRowIdx++ {
-			rowID := rowidCol.Value(batchRowIdx)
-
-			var colUpdates []colUpdate
-			for inputColIdx, tableColIdx := range colMapping {
-				col := batch.Column(inputColIdx)
-				colUpdates = append(colUpdates, colUpdate{
-					colIdx: tableColIdx,
-					value:  extractValue(col, batchRowIdx),
-				})
-			}
-			updates[rowID] = colUpdates
+		var colUpdates []colUpdate
+		for inputColIdx, tableColIdx := range colMapping {
+			col := rows.Column(inputColIdx)
+			colUpdates = append(colUpdates, colUpdate{
+				colIdx: tableColIdx,
+				value:  extractValue(col, batchRowIdx),
+			})
 		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
+		updates[rowID] = colUpdates
 	}
 
 	// Apply updates
@@ -572,34 +570,32 @@ func (t *batchDMLTable) Update(ctx context.Context, rows array.RecordReader, opt
 	return result, nil
 }
 
-// Delete implements catalog.DeletableBatchTable - rowid is embedded in RecordReader
-func (t *batchDMLTable) Delete(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+// Delete implements catalog.DeletableBatchTable - receives RecordBatch directly
+func (t *batchDMLTable) Delete(ctx context.Context, rows arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	start := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.batchDeleteUsed = true
 
-	// Collect rowIDs to delete from the RecordReader
-	deleteSet := make(map[int64]bool)
-
-	for rows.Next() {
-		batch := rows.RecordBatch()
-		// Find rowid column - should be the first (and only) column for DELETE
-		rowidColIdx := catalog.FindRowIDColumn(batch.Schema())
-		if rowidColIdx == -1 {
-			// Default to first column if not found by name/metadata
-			rowidColIdx = 0
-		}
-
-		rowidCol := batch.Column(rowidColIdx).(*array.Int64)
-		for i := 0; i < int(batch.NumRows()); i++ {
-			deleteSet[rowidCol.Value(i)] = true
-		}
+	// Find rowid column - should be the first (and only) column for DELETE
+	rowidColIdx := catalog.FindRowIDColumn(rows.Schema())
+	if rowidColIdx == -1 {
+		// Default to first column if not found by name/metadata
+		rowidColIdx = 0
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
+	// Check for null rowids - return error immediately per FR-011
+	rowidCol := rows.Column(rowidColIdx)
+	if rowidCol.NullN() > 0 {
+		return nil, catalog.ErrNullRowID
+	}
+
+	// Collect rowIDs to delete - direct access to RecordBatch (no Next() loop needed)
+	deleteSet := make(map[int64]bool)
+	rowidArr := rowidCol.(*array.Int64)
+	for i := 0; i < int(rows.NumRows()); i++ {
+		deleteSet[rowidArr.Value(i)] = true
 	}
 
 	// Filter out deleted rows

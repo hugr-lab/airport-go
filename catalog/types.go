@@ -2,10 +2,16 @@ package catalog
 
 import (
 	"context"
+	"errors"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
+
+// ErrNullRowID is returned when a null rowid value is encountered in UPDATE or DELETE operations.
+// Implementations of UpdatableBatchTable and DeletableBatchTable MUST return this error
+// when they encounter null values in the rowid column of the input Record.
+var ErrNullRowID = errors.New("null rowid value not allowed")
 
 // ScanOptions provides options for table scans.
 type ScanOptions struct {

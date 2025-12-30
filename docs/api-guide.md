@@ -231,44 +231,55 @@ type DeletableTable interface {
 
 ### catalog.UpdatableBatchTable
 
-Alternative UPDATE interface where the rowid column is embedded in the RecordReader.
+Alternative UPDATE interface where the rowid column is embedded in the RecordBatch.
 This interface is preferred over `UpdatableTable` when both are implemented.
 
 ```go
 type UpdatableBatchTable interface {
     Table
 
-    // Update modifies existing rows using data from the RecordReader.
-    // The rows RecordReader contains both the rowid column (identifying rows to update)
+    // Update modifies existing rows using data from the RecordBatch.
+    // The rows RecordBatch contains both the rowid column (identifying rows to update)
     // and the new column values. Implementations MUST extract rowid values from
     // the rowid column (identified by name "rowid" or metadata key "is_rowid").
     // Use FindRowIDColumn(rows.Schema()) to locate the rowid column.
-    // Row order in RecordReader determines update order.
+    // Implementations MUST return ErrNullRowID if any rowid value is null.
+    // Row order in RecordBatch determines update order.
     // opts contains RETURNING clause information.
     // Returns DMLResult with affected row count and optional returning data.
     // Caller MUST call rows.Release() after Update returns.
-    Update(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
+    Update(ctx context.Context, rows arrow.RecordBatch, opts *DMLOptions) (*DMLResult, error)
 }
 ```
 
 ### catalog.DeletableBatchTable
 
-Alternative DELETE interface where the rowid column is embedded in the RecordReader.
+Alternative DELETE interface where the rowid column is embedded in the RecordBatch.
 This interface is preferred over `DeletableTable` when both are implemented.
 
 ```go
 type DeletableBatchTable interface {
     Table
 
-    // Delete removes rows identified by rowid values in the RecordReader.
-    // The rows RecordReader contains the rowid column (identified by name "rowid"
+    // Delete removes rows identified by rowid values in the RecordBatch.
+    // The rows RecordBatch contains the rowid column (identified by name "rowid"
     // or metadata key "is_rowid") that identifies rows to delete.
     // Use FindRowIDColumn(rows.Schema()) to locate the rowid column.
+    // Implementations MUST return ErrNullRowID if any rowid value is null.
     // opts contains RETURNING clause information.
     // Returns DMLResult with affected row count and optional returning data.
     // Caller MUST call rows.Release() after Delete returns.
-    Delete(ctx context.Context, rows array.RecordReader, opts *DMLOptions) (*DMLResult, error)
+    Delete(ctx context.Context, rows arrow.RecordBatch, opts *DMLOptions) (*DMLResult, error)
 }
+```
+
+### catalog.ErrNullRowID
+
+Sentinel error for null rowid values:
+
+```go
+// ErrNullRowID is returned when a null rowid value is encountered in UPDATE or DELETE operations.
+var ErrNullRowID = errors.New("null rowid value not allowed")
 ```
 
 ### catalog.FindRowIDColumn
@@ -288,21 +299,26 @@ func FindRowIDColumn(schema *arrow.Schema) int
 **Example usage:**
 
 ```go
-func (t *MyTable) Update(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
+func (t *MyTable) Update(ctx context.Context, rows arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
     rowidIdx := catalog.FindRowIDColumn(rows.Schema())
     if rowidIdx == -1 {
         return nil, errors.New("rowid column required")
     }
 
-    var affected int64
-    for rows.Next() {
-        batch := rows.RecordBatch()
-        rowidCol := batch.Column(rowidIdx).(*array.Int64)
-        // Process updates using rowidCol values...
-        affected += batch.NumRows()
+    // Check for null rowids
+    rowidCol := rows.Column(rowidIdx)
+    if rowidCol.NullN() > 0 {
+        return nil, catalog.ErrNullRowID
     }
 
-    return &catalog.DMLResult{AffectedRows: affected}, nil
+    // Direct access to RecordBatch - no iterator needed
+    rowidArr := rowidCol.(*array.Int64)
+    for i := 0; i < int(rows.NumRows()); i++ {
+        rowID := rowidArr.Value(i)
+        // Process update for rowID...
+    }
+
+    return &catalog.DMLResult{AffectedRows: rows.NumRows()}, nil
 }
 ```
 
@@ -500,6 +516,9 @@ type DynamicTable interface {
 
     // RenameField renames a field in a struct-typed column.
     RenameField(ctx context.Context, columnPath []string, newName string, opts RenameFieldOptions) error
+
+    // RemoveField removes a field from a struct-typed column.
+    RemoveField(ctx context.Context, columnPath []string, opts RemoveFieldOptions) error
 }
 
 type AddColumnOptions struct {
@@ -540,6 +559,10 @@ type AddFieldOptions struct {
 
 type RenameFieldOptions struct {
     IgnoreNotFound bool
+}
+
+type RemoveFieldOptions struct {
+    IgnoreNotFound bool // Don't error if table/column doesn't exist
 }
 ```
 

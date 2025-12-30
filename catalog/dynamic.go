@@ -145,6 +145,12 @@ type RenameFieldOptions struct {
 	IgnoreNotFound bool
 }
 
+// RemoveFieldOptions configures field removal from struct columns.
+type RemoveFieldOptions struct {
+	// IgnoreNotFound suppresses error if table or column doesn't exist.
+	IgnoreNotFound bool
+}
+
 // CatalogVersion contains the version information for a catalog.
 type CatalogVersion struct {
 	// Version is the current version number of the catalog.
@@ -251,4 +257,9 @@ type DynamicTable interface {
 	// The columnPath is the path to the field (e.g., ["col", "nested", "field"]).
 	// Returns ErrNotFound if column path doesn't exist and IgnoreNotFound is false.
 	RenameField(ctx context.Context, columnPath []string, newName string, opts RenameFieldOptions) error
+
+	// RemoveField removes a field from a struct-typed column.
+	// The columnPath is the path to the field (e.g., ["col", "nested", "field"]).
+	// Returns ErrNotFound if column path doesn't exist and IfFieldExists is false.
+	RemoveField(ctx context.Context, columnPath []string, opts RemoveFieldOptions) error
 }

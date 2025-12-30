@@ -34,7 +34,7 @@ type AirportChangedFinalMetadata struct {
 // - Server sends final metadata with total_changed count
 //
 // Implementation uses a bidirectional pipeline with concurrent goroutines:
-// 1. Reader goroutine: Reads input records from client stream
+// 1. Reader goroutine: Reads input records from client stream, inserts rows if not RETURNING data requested
 // 2. Processor goroutine: Inserts data and produces RETURNING data
 // 3. Writer goroutine: Sends RETURNING data back to client (if requested)
 func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.FlightService_DoExchangeServer, schemaName, tableName string, returnData bool) error {
@@ -129,9 +129,29 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 
 	// Reader goroutine: reads input batches from stream
 	// Run outside errgroup to properly handle stream closure
+	var readerErr error
 	go func() {
 		defer close(inputCh)
 		defer inputReader.Release()
+
+		// If no RETURNING is requested, we can do a simple insert
+		if !opts.Returning {
+			var dmlResult *catalog.DMLResult
+			insertErr := s.withTransaction(egCtx, func(txCtx context.Context) error {
+				var err error
+				dmlResult, err = insertableTable.Insert(txCtx, inputReader, opts)
+				return err
+			})
+			if insertErr != nil {
+				s.logger.Error("Failed to execute INSERT", "error", insertErr)
+				readerErr = insertErr
+				return
+			}
+			if dmlResult != nil {
+				totalRows = dmlResult.AffectedRows
+			}
+			return
+		}
 
 		for inputReader.Next() {
 			record := inputReader.RecordBatch()
@@ -177,29 +197,15 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 				dmlResult, err = insertableTable.Insert(txCtx, batchReader, opts)
 				return err
 			})
-
 			batch.Release()
+			batchReader.Release()
 
 			if insertErr != nil {
 				return insertErr
 			}
 
-			// Send RETURNING data through output channel if requested
-			if returnData && dmlResult != nil && dmlResult.ReturningData != nil {
-				for dmlResult.ReturningData.Next() {
-					outBatch := dmlResult.ReturningData.RecordBatch()
-					outBatch.Retain()
-
-					select {
-					case outputCh <- outBatch:
-					case <-egCtx.Done():
-						outBatch.Release()
-						return egCtx.Err()
-					}
-				}
-				if err := dmlResult.ReturningData.Err(); err != nil {
-					return err
-				}
+			if err := sendReturningData(egCtx, dmlResult, returnData, outputCh); err != nil {
+				return err
 			}
 		}
 
@@ -222,7 +228,10 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 	})
 
 	// Wait for pipeline to complete
-	if err := eg.Wait(); err != nil {
+	if err := eg.Wait(); err != nil || readerErr != nil {
+		if err == nil && readerErr != nil {
+			err = readerErr
+		}
 		s.logger.Error("INSERT pipeline failed", "schema", schemaName, "table", tableName, "error", err)
 		return status.Errorf(codes.Internal, "INSERT failed: %v", err)
 	}
@@ -804,18 +813,13 @@ type batchProcessor func(ctx context.Context, batch arrow.RecordBatch, opts *cat
 // newUpdateProcessor returns a batch processor for UPDATE operations.
 // Prefers batch interface over legacy. Returns nil if neither is supported.
 func (s *Server) newUpdateProcessor(table catalog.Table, rowidColIdx int) (batchProcessor, bool) {
-	// Prefer batch interface
+	// Prefer batch interface - pass RecordBatch directly
 	if batchTable, ok := table.(catalog.UpdatableBatchTable); ok {
 		return func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
-			batchReader, err := array.NewRecordReader(batch.Schema(), []arrow.RecordBatch{batch})
-			if err != nil {
-				return nil, err
-			}
-
 			var result *catalog.DMLResult
 			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
 				var err error
-				result, err = batchTable.Update(txCtx, batchReader, opts)
+				result, err = batchTable.Update(txCtx, batch, opts)
 				return err
 			})
 			return result, txErr
@@ -845,6 +849,7 @@ func (s *Server) newUpdateProcessor(table catalog.Table, rowidColIdx int) (batch
 			if err != nil {
 				return nil, err
 			}
+			defer recordReader.Release()
 
 			var result *catalog.DMLResult
 			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
@@ -862,18 +867,13 @@ func (s *Server) newUpdateProcessor(table catalog.Table, rowidColIdx int) (batch
 // newDeleteProcessor returns a batch processor for DELETE operations.
 // Prefers batch interface over legacy. Returns nil if neither is supported.
 func (s *Server) newDeleteProcessor(table catalog.Table) (batchProcessor, bool) {
-	// Prefer batch interface
+	// Prefer batch interface - pass RecordBatch directly
 	if batchTable, ok := table.(catalog.DeletableBatchTable); ok {
 		return func(ctx context.Context, batch arrow.RecordBatch, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
-			batchReader, err := array.NewRecordReader(batch.Schema(), []arrow.RecordBatch{batch})
-			if err != nil {
-				return nil, err
-			}
-
 			var result *catalog.DMLResult
 			txErr := s.withTransaction(ctx, func(txCtx context.Context) error {
 				var err error
-				result, err = batchTable.Delete(txCtx, batchReader, opts)
+				result, err = batchTable.Delete(txCtx, batch, opts)
 				return err
 			})
 			return result, txErr
@@ -911,6 +911,7 @@ func sendReturningData(ctx context.Context, result *catalog.DMLResult, returnDat
 	if !returnData || result == nil || result.ReturningData == nil {
 		return nil
 	}
+	defer result.ReturningData.Release()
 
 	for result.ReturningData.Next() {
 		outBatch := result.ReturningData.RecordBatch()
