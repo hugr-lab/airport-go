@@ -9,6 +9,7 @@ github.com/hugr-lab/airport-go
 ├── airport.go          # Main package: Server, CatalogBuilder
 ├── catalog/            # Catalog interfaces
 ├── auth/               # Authentication implementations
+├── filter/             # Filter pushdown parsing and encoding
 └── flight/             # Flight handler (internal)
 ```
 
@@ -170,6 +171,7 @@ func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.Re
 ```
 
 **Note:** Currently, implementations must parse the raw JSON manually. Future versions of airport-go will provide helper types and functions for filter interpretation, including:
+
 - Type-safe expression tree structures
 - Operator and value extraction utilities
 - SQL/query builder helpers
@@ -918,3 +920,100 @@ All interface implementations must be safe for concurrent use:
 - DDL operations may occur concurrently with queries
 
 Use appropriate synchronization in your implementations.
+
+## Filter Pushdown Package
+
+The `filter` package enables parsing and encoding DuckDB filter pushdown JSON.
+
+### Parsing Filters
+
+```go
+import "github.com/hugr-lab/airport-go/filter"
+
+// Parse filter JSON from ScanOptions.Filter
+fp, err := filter.Parse(scanOpts.Filter)
+if err != nil {
+    return err // Malformed JSON
+}
+
+// Access filters (implicitly AND'ed)
+for _, f := range fp.Filters {
+    // Process filter expression
+}
+
+// Resolve column names
+colRef := f.(*filter.ColumnRefExpression)
+name, err := fp.ColumnName(colRef)
+```
+
+### Encoding to SQL
+
+```go
+// Create DuckDB encoder
+enc := filter.NewDuckDBEncoder(nil)
+
+// Encode all filters to WHERE clause body
+sql := enc.EncodeFilters(fp)
+if sql != "" {
+    query := "SELECT * FROM table WHERE " + sql
+}
+```
+
+### Column Mapping
+
+```go
+// Map column names during encoding
+enc := filter.NewDuckDBEncoder(&filter.EncoderOptions{
+    ColumnMapping: map[string]string{
+        "user_id": "uid",           // user_id → uid
+        "created": "created_at",    // created → created_at
+    },
+})
+```
+
+### Expression Replacement
+
+```go
+// Replace columns with SQL expressions
+enc := filter.NewDuckDBEncoder(&filter.EncoderOptions{
+    ColumnExpressions: map[string]string{
+        "full_name": "CONCAT(first_name, ' ', last_name)",
+    },
+})
+```
+
+### Unsupported Expression Handling
+
+The encoder gracefully skips unsupported expressions:
+- **AND**: Skips unsupported children, keeps others
+- **OR**: If any child unsupported, skips entire OR
+- **All unsupported**: Returns empty string
+
+This produces the widest possible filter; DuckDB client applies filters client-side as fallback.
+
+### Expression Types
+
+```go
+switch e := expr.(type) {
+case *filter.ComparisonExpression:
+    // =, <>, <, >, <=, >=, IN, NOT IN, BETWEEN
+case *filter.ConjunctionExpression:
+    // AND, OR
+case *filter.ConstantExpression:
+    // Literal values
+case *filter.ColumnRefExpression:
+    // Column references
+case *filter.FunctionExpression:
+    // Function calls (LOWER, LENGTH, etc.)
+case *filter.CastExpression:
+    // Type casts
+case *filter.BetweenExpression:
+    // BETWEEN expressions
+case *filter.OperatorExpression:
+    // IS NULL, IS NOT NULL, NOT
+case *filter.CaseExpression:
+    // CASE WHEN ... END
+}
+```
+
+See `examples/filter/main.go` for complete examples.

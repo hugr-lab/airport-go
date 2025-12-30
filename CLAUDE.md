@@ -10,6 +10,8 @@ Auto-generated from all feature plans. Last updated: 2025-11-29
 - N/A (library, storage-agnostic) (005-module-reorganization)
 - Go 1.25+ + Apache Arrow Go v18, gRPC, msgpack-go (001-batch-table-interfaces)
 - N/A (storage-agnostic library) (001-batch-table-interfaces)
+- Go 1.25+ (matching existing project) + Standard library only (encoding/json for parsing, strings/fmt for encoding). No new external dependencies required. (012-filter-pushdown)
+- N/A (pure transformation library) (012-filter-pushdown)
 
 ## Project Structure
 
@@ -74,9 +76,9 @@ go work sync
 - No silent failures - errors must be handled explicitly
 
 ## Recent Changes
+- 012-filter-pushdown: Added Go 1.25+ (matching existing project) + Standard library only (encoding/json for parsing, strings/fmt for encoding). No new external dependencies required.
 - 001-batch-table-interfaces: Added Go 1.25+ + Apache Arrow Go v18, gRPC, msgpack-go
 - 006-returning-optimization: Added Go 1.25+ + Arrow-Go v18, gRPC, msgpack-go
-- 005-module-reorganization: Added Go 1.25+
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
