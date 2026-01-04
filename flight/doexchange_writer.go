@@ -2,6 +2,7 @@ package flight
 
 import (
 	"bytes"
+	"sync/atomic"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -15,14 +16,16 @@ type dataStreamWriter interface {
 }
 
 const (
-	streamStateInit = iota
+	streamStateInit = int32(iota)
 	streamStateSchemaSent
 	streamStateWorking
+	streamStateFinished
 )
 
 type schemaPayloadWriter struct {
-	stream dataStreamWriter
-	state  int
+	withChunkSyncReadWrite bool
+	stream                 dataStreamWriter
+	state                  atomic.Int32
 }
 
 func (w *schemaPayloadWriter) Start() error {
@@ -30,12 +33,16 @@ func (w *schemaPayloadWriter) Start() error {
 }
 
 func (w *schemaPayloadWriter) WritePayload(p ipc.Payload) error {
-	switch w.state {
+	writeFinished := false
+	switch w.state.Load() {
 	case streamStateInit:
-		w.state = streamStateSchemaSent
+		w.state.Store(streamStateSchemaSent)
 	case streamStateSchemaSent:
-		w.state = streamStateWorking
+		w.state.Store(streamStateWorking)
 		return nil
+	case streamStateFinished:
+		writeFinished = true
+		w.state.Store(streamStateWorking)
 	}
 	meta := p.Meta()
 	defer meta.Release()
@@ -47,6 +54,14 @@ func (w *schemaPayloadWriter) WritePayload(p ipc.Payload) error {
 		DataHeader: meta.Bytes(), // flatbuffer Message (SCHEMA)
 		DataBody:   body.Bytes(), // IPC body (empty for schema)
 	}
+	if w.withChunkSyncReadWrite && writeFinished {
+		// indicate end of chunk
+		fd.AppMetadata = []byte("chunk_finished")
+	}
+	if w.withChunkSyncReadWrite && !writeFinished {
+		// indicate	continuation of chunk
+		fd.AppMetadata = []byte("chunk_continues")
+	}
 
 	return w.stream.Send(fd)
 }
@@ -57,14 +72,15 @@ func (w *schemaPayloadWriter) Close() error {
 
 type SchemaWriter struct {
 	*ipc.Writer
-	pw        *schemaPayloadWriter
-	allocator memory.Allocator
-	schema    *arrow.Schema
+	pw         *schemaPayloadWriter
+	allocator  memory.Allocator
+	schema     *arrow.Schema
+	emptyBatch arrow.RecordBatch
 }
 
-func NewSchemaWriter(stream dataStreamWriter, schema *arrow.Schema, allocator memory.Allocator, opts ...ipc.Option) *SchemaWriter {
+func NewSchemaWriter(stream dataStreamWriter, schema *arrow.Schema, allocator memory.Allocator, withChunkSyncReadWrite bool, opts ...ipc.Option) *SchemaWriter {
 	opts = append(opts, ipc.WithAllocator(allocator), ipc.WithSchema(schema))
-	payloadWriter := &schemaPayloadWriter{stream: stream}
+	payloadWriter := &schemaPayloadWriter{stream: stream, withChunkSyncReadWrite: withChunkSyncReadWrite}
 	writer := ipc.NewWriterWithPayloadWriter(payloadWriter, opts...)
 
 	return &SchemaWriter{
@@ -79,8 +95,12 @@ func (w *SchemaWriter) Begin() error {
 	// Create empty batch to send schema upfront
 	b := array.NewRecordBuilder(w.allocator, w.schema)
 	defer b.Release()
-	emptyBatch := b.NewRecordBatch()
-	defer emptyBatch.Release()
+	w.emptyBatch = b.NewRecordBatch()
 
-	return w.Write(emptyBatch)
+	return w.Write(w.emptyBatch)
+}
+
+func (w *SchemaWriter) WriteFinished() error {
+	w.pw.state.Store(streamStateFinished)
+	return w.Write(w.emptyBatch)
 }

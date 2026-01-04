@@ -188,7 +188,7 @@ func (f *myFunc) Execute(ctx context.Context, input arrow.Record) (arrow.Record,
 ## Limitations
 
 ### Current Limitations
-1. **Scalar Functions**: DuckDB Airport extension doesn't yet support calling scalar functions in queries. They can be registered and discovered, but execution support is pending.
+1. **Scalar Functions**: Fully supported. Can be called like regular tables in SELECT clauses.
 
 2. **Table Functions**: Fully supported. Can be called like regular tables in FROM clauses.
 
