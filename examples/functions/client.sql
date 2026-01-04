@@ -13,12 +13,9 @@ ATTACH '' AS funcs (TYPE airport, LOCATION 'grpc://localhost:50051');
 -- Scalar Function Examples
 -- ========================================
 
--- Note: Scalar function execution via Airport is not yet fully supported by DuckDB.
--- These examples show the intended usage once support is added.
-
 -- Multiply values in the users table
--- SELECT id, name, value, funcs.functions_demo.MULTIPLY(value, 2) as doubled
--- FROM funcs.functions_demo.users;
+SELECT id, name, value, funcs.functions_demo.MULTIPLY(value, 2) as doubled
+FROM funcs.functions_demo.users;
 
 -- ========================================
 -- Table Function Examples

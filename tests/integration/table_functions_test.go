@@ -314,6 +314,7 @@ func (f *filterRowsFunc) Execute(ctx context.Context, params []any, input array.
 	// For in/out table functions via DoExchange, we can return the input reader directly
 	// since it's already a streaming reader. The data will flow through as it arrives.
 	// We just need to ensure the reader stays valid for the caller.
+	input.Retain()
 	return input, nil
 }
 
@@ -382,6 +383,7 @@ func (f *multiplyColumnFunc) Execute(ctx context.Context, params []any, input ar
 
 	// Create a streaming reader that transforms data on-the-fly
 	// We wrap the input reader to process batches as they arrive
+	input.Retain()
 	return &multiplyColumnReader{
 		input:      input,
 		schema:     schema,

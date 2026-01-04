@@ -185,7 +185,7 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 	)
 
 	// Create a record writer for output data
-	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator, false)
 	defer writer.Close()
 
 	if err := writer.Begin(); err != nil {
@@ -427,48 +427,151 @@ func (s *Server) handleTableFunction(ctx context.Context, stream flight.FlightSe
 	s.logger.Debug("Output schema for table function",
 		"schema", outputSchema,
 	)
-
 	// Create writer for output data and send schema BEFORE executing function
 	// This allows the client to start sending input data
-	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator, true)
 	defer writer.Close()
 
 	if err := writer.Begin(); err != nil {
 		return status.Errorf(codes.Internal, "failed to send output schema: %v", err)
 	}
 
-	// Execute the table function
-	// The function will read from inputReader which streams from the client
-	opts := &catalog.ScanOptions{} // TODO: Pass actual scan options if needed
-	outputReader, err := targetFunc.Execute(ctx, params, inputReader, opts)
-	if err != nil {
-		return status.Errorf(codes.Internal, "table function execution failed: %v", err)
-	}
-	defer outputReader.Release()
+	inputCh := make(chan arrow.RecordBatch, 1)
+	// read input batches
+	go func() {
+		defer inputReader.Release()
+		defer close(inputCh)
 
-	// Stream output batches to client
-	batchCount := 0
-	for outputReader.Next() {
-		batchCount++
-		batch := outputReader.RecordBatch()
+		for inputReader.Next() {
+			record := inputReader.RecordBatch()
+			record.Retain() // Retain for passing to function
 
-		s.logger.Debug("Sending table function output batch",
-			"batch", batchCount,
-			"rows", batch.NumRows(),
-		)
+			s.logger.Debug("Received input batch for table function",
+				"num_rows", record.NumRows(),
+				"num_cols", record.NumCols(),
+			)
 
-		if err := writer.Write(batch); err != nil {
-			return status.Errorf(codes.Internal, "failed to write output batch: %v", err)
+			select {
+			case inputCh <- record:
+			case <-ctx.Done():
+				return
+			}
 		}
+	}()
+
+	eg, egCtx := errgroup.WithContext(ctx)
+	processCh := make(chan array.RecordReader, 1)
+	// process input batches
+	eg.Go(func() error {
+		defer close(processCh)
+
+		for {
+			select {
+			case <-egCtx.Done():
+				return egCtx.Err()
+			case batch, ok := <-inputCh:
+				if !ok {
+					// inputCh closed, no more data
+					return nil
+				}
+
+				s.logger.Debug("Processing input batch for table function",
+					"rows", batch.NumRows(),
+					"columns", batch.NumCols(),
+				)
+
+				// Save input row count before releasing
+				inLen := batch.NumRows()
+				reader, err := array.NewRecordReader(batch.Schema(), []arrow.RecordBatch{batch})
+				if err != nil {
+					batch.Release()
+					return err
+				}
+				batch.Release()
+
+				// Execute the table function
+				outputReader, err := targetFunc.Execute(egCtx, params, reader, &catalog.ScanOptions{})
+				reader.Release()
+				if err != nil {
+					s.logger.Error("Table function execution failed",
+						"function", functionName,
+						"error", err,
+					)
+					return err
+				}
+
+				// sent to writer stage
+				select {
+				case processCh <- outputReader:
+				case <-egCtx.Done():
+					outputReader.Release()
+					return egCtx.Err()
+				}
+
+				s.logger.Debug("Table function batch processed",
+					"input_rows", inLen,
+				)
+			}
+		}
+	})
+
+	// write output batches
+	totalBatches := 0
+	totalRows := int64(0)
+	eg.Go(func() error {
+		for outputReader := range processCh {
+			// Send output batches to client
+			batchCount := 0
+			var rowsCount int64
+			for outputReader.Next() {
+				batchCount++
+				batch := outputReader.RecordBatch()
+				rowsCount += batch.NumRows()
+
+				s.logger.Debug("Sending table function output batch",
+					"batch", batchCount,
+					"rows", batch.NumRows(),
+				)
+
+				if err := writer.Write(batch); err != nil {
+					return fmt.Errorf("failed to write output batch: %w", err)
+				}
+			}
+
+			if err := writer.WriteFinished(); err != nil {
+				outputReader.Release()
+				return fmt.Errorf("failed to finalize output batch: %w", err)
+			}
+
+			if err := outputReader.Err(); err != nil {
+				outputReader.Release()
+				return fmt.Errorf("error reading output: %w", err)
+			}
+			outputReader.Release()
+
+			s.logger.Debug("Table function output reader completed",
+				"batches_sent", batchCount,
+				"rows_sent", rowsCount,
+			)
+			totalBatches += batchCount
+			totalRows += rowsCount
+		}
+		return nil
+	})
+
+	// wait for all stages to complete
+	if err := eg.Wait(); err != nil {
+		s.logger.Error("DoExchange table function pipeline failed",
+			"function", functionName,
+			"error", err,
+		)
+		return status.Errorf(codes.Internal, "table function `%s.%s` execution failed: %v", schemaName, functionName, err)
 	}
 
-	if err := outputReader.Err(); err != nil {
-		return status.Errorf(codes.Internal, "error reading output: %v", err)
-	}
-
-	s.logger.Debug("Table function execution completed",
+	s.logger.Debug("DoExchange table function completed",
 		"function", functionName,
-		"batches_sent", batchCount,
+		"total_batches", totalBatches,
+		"total_rows", totalRows,
 	)
 
 	return nil

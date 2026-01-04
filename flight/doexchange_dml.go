@@ -107,7 +107,7 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 	}
 
 	// Create a writer to send output schema (required for bidirectional exchange)
-	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator, false)
 	defer writer.Close()
 
 	// Send schema to client to acknowledge and enable bidirectional data flow
@@ -334,7 +334,7 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 	}
 
 	// Create a writer to send output schema (required for bidirectional exchange)
-	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator, false)
 	defer writer.Close()
 
 	// Send schema to client to acknowledge and enable bidirectional data flow
@@ -522,7 +522,7 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 	}
 
 	// Create a writer to send output schema (required for bidirectional exchange)
-	writer := NewSchemaWriter(stream, outputSchema, s.allocator)
+	writer := NewSchemaWriter(stream, outputSchema, s.allocator, false)
 	defer writer.Close()
 
 	// Send schema to client to acknowledge and enable bidirectional data flow
