@@ -30,6 +30,16 @@ type Catalog interface {
 	Schema(ctx context.Context, name string) (Schema, error)
 }
 
+// NamedCatalog extends Catalog with a name.
+type NamedCatalog interface {
+	Catalog
+
+	// Name returns the catalog name (e.g., "default", "analytics").
+	// Use this name in the attach command in DuckDB.
+	// MUST return string (can be empty).
+	Name() string
+}
+
 // Schema represents a database schema containing tables and functions.
 // Implementations MUST be goroutine-safe.
 type Schema interface {

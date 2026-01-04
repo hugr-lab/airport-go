@@ -33,6 +33,50 @@ type Catalog interface {
 }
 ```
 
+### catalog.NamedCatalog
+
+Optional interface that provides a name for the catalog. When implemented, DuckDB can use the catalog name in ATTACH statements.
+
+```go
+type NamedCatalog interface {
+    Catalog
+
+    // Name returns the catalog name (e.g., "default", "analytics").
+    // MUST return string (can be empty).
+    Name() string
+}
+```
+
+**Usage in DuckDB:**
+
+```sql
+-- When server implements NamedCatalog returning "mydata":
+ATTACH 'mydata' AS analytics (TYPE AIRPORT, LOCATION 'grpc://localhost:50051');
+
+-- Query using the alias
+SELECT * FROM analytics.schema.table;
+```
+
+**Example Implementation:**
+
+```go
+type MyCatalog struct {
+    // ... fields
+}
+
+func (c *MyCatalog) Name() string {
+    return "mydata"
+}
+
+func (c *MyCatalog) Schemas(ctx context.Context) ([]catalog.Schema, error) {
+    // ... implementation
+}
+
+func (c *MyCatalog) Schema(ctx context.Context, name string) (catalog.Schema, error) {
+    // ... implementation
+}
+```
+
 ### catalog.Schema
 
 Represents a namespace containing tables and functions.

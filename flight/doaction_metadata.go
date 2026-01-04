@@ -136,7 +136,7 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 	appMetadata, _ := msgpack.Encode(map[string]interface{}{
 		"type":         "table",
 		"schema":       schema.Name(),
-		"catalog":      "", // Empty catalog name
+		"catalog":      s.CatalogName(),
 		"name":         table.Name(),
 		"comment":      table.Comment(),
 		"input_schema": nil,
@@ -299,6 +299,7 @@ func (s *Server) createTableFunctionTicket(ctx context.Context, schemaName, func
 	}
 
 	ticketData := TicketData{
+		Catalog:        s.CatalogName(),
 		Schema:         schemaName,
 		TableFunction:  functionName,
 		FunctionParams: params,
@@ -387,6 +388,7 @@ func (s *Server) resolveTableFunctionColumns(ctx context.Context, schemaName, fu
 // createTableTicket creates a ticket for regular table scan.
 func (s *Server) createTableTicket(ctx context.Context, schemaName, tableName string, request *endpointsRequest) ([]byte, error) {
 	ticketData := TicketData{
+		Catalog: s.CatalogName(),
 		Schema:  schemaName,
 		Table:   tableName,
 		Filters: []byte(request.Parameters.JsonFilters),

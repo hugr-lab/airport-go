@@ -187,6 +187,11 @@ func (s *Server) handleCreateSchemaAction(ctx context.Context, action *flight.Ac
 		"schema", params.Schema,
 	)
 
+	if params.CatalogName != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.CatalogName)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.CatalogName)
+	}
+
 	// Validate required fields
 	if params.Schema == "" {
 		return status.Error(codes.InvalidArgument, "schema name is required")
@@ -266,6 +271,11 @@ func (s *Server) handleDropSchemaAction(ctx context.Context, action *flight.Acti
 		"ignore_not_found", params.IgnoreNotFound,
 	)
 
+	if params.CatalogName != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.CatalogName)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.CatalogName)
+	}
+
 	// Check if catalog supports dynamic operations
 	dynCat, ok := s.catalog.(catalog.DynamicCatalog)
 	if !ok {
@@ -310,6 +320,11 @@ func (s *Server) handleCreateTableAction(ctx context.Context, action *flight.Act
 		"table_name", params.TableName,
 		"on_conflict", params.OnConflict,
 	)
+
+	if params.CatalogName != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.CatalogName)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.CatalogName)
+	}
 
 	// Validate required fields
 	if params.SchemaName == "" {
@@ -421,6 +436,11 @@ func (s *Server) handleDropTableAction(ctx context.Context, action *flight.Actio
 		"ignore_not_found", params.IgnoreNotFound,
 	)
 
+	if params.CatalogName != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.CatalogName)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.CatalogName)
+	}
+
 	// Validate required fields
 	if params.SchemaName == "" {
 		return status.Error(codes.InvalidArgument, "schema_name is required")
@@ -483,6 +503,11 @@ func (s *Server) handleAddColumnAction(ctx context.Context, action *flight.Actio
 		"table", params.Name,
 		"if_column_not_exists", params.IfColumnNotExists,
 	)
+
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
 
 	// Validate required fields
 	if params.Schema == "" {
@@ -598,6 +623,11 @@ func (s *Server) handleRemoveColumnAction(ctx context.Context, action *flight.Ac
 		"if_column_exists", params.IfColumnExists,
 	)
 
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
+
 	// Validate required fields
 	if params.Schema == "" {
 		return status.Error(codes.InvalidArgument, "schema is required")
@@ -700,6 +730,11 @@ func (s *Server) handleRenameColumnAction(ctx context.Context, action *flight.Ac
 		"old_name", params.OldName,
 		"new_name", params.NewName,
 	)
+
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
 
 	// Validate required fields
 	if params.Schema == "" {
@@ -808,6 +843,11 @@ func (s *Server) handleRenameTableAction(ctx context.Context, action *flight.Act
 		"new_table_name", params.NewTableName,
 	)
 
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
+
 	// Validate required fields
 	if params.Schema == "" {
 		return status.Error(codes.InvalidArgument, "schema is required")
@@ -904,6 +944,11 @@ func (s *Server) handleChangeColumnTypeAction(ctx context.Context, action *fligh
 		"table", params.Name,
 		"expression", params.Expression,
 	)
+
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
 
 	// Validate required fields
 	if params.Schema == "" {
@@ -1009,6 +1054,11 @@ func (s *Server) handleSetNotNullAction(ctx context.Context, action *flight.Acti
 		"column_name", params.ColumnName,
 	)
 
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
+
 	// Validate required fields
 	if params.Schema == "" {
 		return status.Error(codes.InvalidArgument, "schema is required")
@@ -1090,6 +1140,11 @@ func (s *Server) handleDropNotNullAction(ctx context.Context, action *flight.Act
 		"table", params.Name,
 		"column_name", params.ColumnName,
 	)
+
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
 
 	// Validate required fields
 	if params.Schema == "" {
@@ -1174,6 +1229,11 @@ func (s *Server) handleSetDefaultAction(ctx context.Context, action *flight.Acti
 		"expression", params.Expression,
 	)
 
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
+
 	// Validate required fields
 	if params.Schema == "" {
 		return status.Error(codes.InvalidArgument, "schema is required")
@@ -1255,6 +1315,11 @@ func (s *Server) handleAddFieldAction(ctx context.Context, action *flight.Action
 		"table", params.Name,
 		"if_field_not_exists", params.IfFieldNotExists,
 	)
+
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
 
 	// Validate required fields
 	if params.Schema == "" {
@@ -1365,6 +1430,11 @@ func (s *Server) handleRenameFieldAction(ctx context.Context, action *flight.Act
 		"new_name", params.NewName,
 	)
 
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
+
 	// Validate required fields
 	if params.Schema == "" {
 		return status.Error(codes.InvalidArgument, "schema is required")
@@ -1468,6 +1538,10 @@ func (s *Server) handleRemoveFieldAction(ctx context.Context, action *flight.Act
 		"table", params.Name,
 		"column_path", params.ColumnPath,
 	)
+	if params.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.Catalog)
+	}
 
 	// Validate required fields
 	if params.Schema == "" {
@@ -1564,6 +1638,10 @@ func (s *Server) handleCatalogVersionAction(ctx context.Context, action *flight.
 	}
 
 	s.logger.Debug("handleCatalogVersion called", "catalog_name", params.CatalogName)
+	if params.CatalogName != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.CatalogName)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.CatalogName)
+	}
 
 	// Check if catalog supports versioning
 	versionedCat, ok := s.catalog.(catalog.VersionedCatalog)
@@ -1630,7 +1708,7 @@ func (s *Server) buildTableFlightInfo(_ context.Context, schema catalog.Schema, 
 	appMetadata := map[string]interface{}{
 		"type":         "table",
 		"schema":       schema.Name(),
-		"catalog":      "",
+		"catalog":      s.CatalogName(),
 		"name":         table.Name(),
 		"comment":      table.Comment(),
 		"input_schema": nil,
@@ -1651,7 +1729,7 @@ func (s *Server) buildTableFlightInfo(_ context.Context, schema catalog.Schema, 
 	}
 
 	// Generate ticket for this table
-	ticket, err := EncodeTicket(schema.Name(), table.Name())
+	ticket, err := EncodeTicket(s.CatalogName(), schema.Name(), table.Name())
 	if err != nil {
 		return nil, err
 	}

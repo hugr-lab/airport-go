@@ -15,6 +15,7 @@ go.work.sum
 /bin/
 /dist/
 /build/
+/artifacts/
 
 # Test binary, built with `go test -c`
 *.test
