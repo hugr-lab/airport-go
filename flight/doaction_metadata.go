@@ -454,6 +454,14 @@ func mapColumnIDsToNames(schema *arrow.Schema, columnIDs []uint64) []string {
 	numFields := uint64(schema.NumFields())
 	columns := make([]string, 0, len(columnIDs))
 	for _, colID := range columnIDs {
+		if colID == ^uint64(0) {
+			// get rowId column
+			idx := catalog.FindRowIDColumn(schema)
+			if idx < 0 {
+				continue
+			}
+			colID = uint64(idx)
+		}
 		if colID < numFields {
 			columns = append(columns, schema.Field(int(colID)).Name)
 		}
