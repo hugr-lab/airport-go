@@ -11,6 +11,10 @@ import (
 // Tickets are opaque byte slices encoding schema/table/function names for query routing,
 // plus optional time-travel parameters for point-in-time queries and function parameters.
 type TicketData struct {
+	// Catalog is the catalog name (e.g., "default", "analytics") (optional)
+	// If empty, default catalog is used
+	Catalog string `json:"catalog,omitempty"`
+
 	// Schema is the schema name (e.g., "main", "staging")
 	Schema string `json:"schema"`
 
@@ -47,7 +51,7 @@ type TicketData struct {
 // EncodeTicket creates an opaque ticket from schema and table names.
 // The ticket is JSON-encoded for simplicity and transparency.
 // Returns error if encoding fails.
-func EncodeTicket(schema, table string) ([]byte, error) {
+func EncodeTicket(catalog, schema, table string) ([]byte, error) {
 	if schema == "" {
 		return nil, fmt.Errorf("schema name cannot be empty")
 	}

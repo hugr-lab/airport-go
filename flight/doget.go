@@ -40,10 +40,16 @@ func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetS
 	}
 
 	s.logger.Debug("DoGet request",
+		"catalog", ticketData.Catalog,
 		"schema", ticketData.Schema,
 		"table", ticketData.Table,
 		"table_function", ticketData.TableFunction,
 	)
+
+	if ticketData.Catalog != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", ticketData.Catalog)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), ticketData.Catalog)
+	}
 
 	// Look up schema in catalog
 	schema, err := s.catalog.Schema(ctx, ticketData.Schema)

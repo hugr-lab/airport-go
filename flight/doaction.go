@@ -113,6 +113,10 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 	}
 
 	s.logger.Debug("handleListSchemas called", "catalog_name", params.CatalogName)
+	if params.CatalogName != s.CatalogName() {
+		s.logger.Error("Catalog name mismatch", "expected", s.CatalogName(), "got", params.CatalogName)
+		return status.Errorf(codes.InvalidArgument, "catalog name mismatch: expected %q, got %q", s.CatalogName(), params.CatalogName)
+	}
 
 	// Get all schemas from catalog
 	catalogSchemas, err := s.catalog.Schemas(ctx)
@@ -124,7 +128,7 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 	// Build AirportSerializedCatalogRoot structure to match C++ code expectations
 	// Looking at the C++ code, it accesses: catalog_root.schemas where each schema has .name field
 	// The MSGPACK_DEFINE_MAP in the docs shows "schema" but the actual C++ uses .name
-	schemaObjects := make([]map[string]interface{}, 0, len(catalogSchemas))
+	schemaObjects := make([]map[string]any, 0, len(catalogSchemas))
 	for _, schema := range catalogSchemas {
 		// Generate serialized schema contents with FlightInfo for all tables
 		serializedContents, sha256Hash, err := s.serializeSchemaContents(ctx, schema)
@@ -137,7 +141,7 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 		}
 
 		// AirportSerializedContentsWithSHA256Hash for each schema
-		schemaContents := map[string]interface{}{
+		schemaContents := map[string]any{
 			"sha256":     sha256Hash,
 			"url":        nil,                // Optional field must be present
 			"serialized": serializedContents, // Inline serialized FlightInfo data
@@ -145,7 +149,7 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 
 		isDefault := schema.Name() == catalog.DefaultSchemaName // First schema is default
 
-		schemaObj := map[string]interface{}{
+		schemaObj := map[string]any{
 			"name":        schema.Name(), // C++ code uses schema.name
 			"description": schema.Comment(),
 			"tags":        map[string]string{},
@@ -158,19 +162,29 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 	// Create the catalog root structure
 	// C++ struct AirportSerializedCatalogRoot has ALL fields required by MSGPACK_DEFINE_MAP
 	// AirportSerializedContentsWithSHA256Hash for catalog contents
-	catalogContents := map[string]interface{}{
+	catalogContents := map[string]any{
 		"sha256":     "0000000000000000000000000000000000000000000000000000000000000000",
 		"url":        nil, // Optional field must be present
 		"serialized": nil, // Optional field must be present
 	}
 
 	// AirportGetCatalogVersionResult
-	versionInfo := map[string]interface{}{
+	versionInfo := map[string]any{
 		"catalog_version": uint64(1),
 		"is_fixed":        true,
 	}
 
-	catalogRoot := map[string]interface{}{
+	if vc, ok := s.catalog.(catalog.VersionedCatalog); ok {
+		v, err := vc.CatalogVersion(ctx)
+		if err != nil {
+			s.logger.Error("Failed to get catalog version", "error", err)
+			return status.Errorf(codes.Internal, "failed to get catalog version: %v", err)
+		}
+		versionInfo["catalog_version"] = v.Version
+		versionInfo["is_fixed"] = v.IsFixed
+	}
+
+	catalogRoot := map[string]any{
 		"contents":     catalogContents,
 		"schemas":      schemaObjects,
 		"version_info": versionInfo,
@@ -193,7 +207,7 @@ func (s *Server) handleListSchemas(ctx context.Context, action *flight.Action, s
 	// Create AirportSerializedCompressedContent
 	// CRITICAL: MSGPACK_DEFINE (not _MAP) encodes as ARRAY, not map!
 	// C++ struct uses MSGPACK_DEFINE(length, data) which creates [length, data] array
-	compressedContent := []interface{}{
+	compressedContent := []any{
 		uint32(len(uncompressed)), // length as first element
 		string(compressed),        // data as second element
 	}
@@ -277,7 +291,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		appMetadata := map[string]interface{}{
 			"type":         "table",
 			"schema":       schema.Name(),
-			"catalog":      "", // Empty catalog name
+			"catalog":      s.CatalogName(),
 			"name":         table.Name(),
 			"comment":      table.Comment(),
 			"input_schema": nil,
@@ -298,7 +312,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		}
 
 		// Generate ticket for this table
-		ticket, err := EncodeTicket(schema.Name(), table.Name())
+		ticket, err := EncodeTicket(s.CatalogName(), schema.Name(), table.Name())
 		if err != nil {
 			return "", "", fmt.Errorf("failed to encode ticket: %w", err)
 		}
@@ -357,7 +371,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		appMetadata := map[string]interface{}{
 			"type":         "table_function",
 			"schema":       schema.Name(),
-			"catalog":      "", // Empty catalog name
+			"catalog":      s.CatalogName(),
 			"name":         tableFunc.Name(),
 			"comment":      tableFunc.Comment(),
 			"input_schema": inputSchemaBytes, // Serialized Arrow schema of parameters
@@ -437,7 +451,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		appMetadata := map[string]interface{}{
 			"type":         "scalar_function",
 			"schema":       schema.Name(),
-			"catalog":      "", // Empty catalog name
+			"catalog":      s.CatalogName(),
 			"name":         scalarFunc.Name(),
 			"comment":      scalarFunc.Comment(),
 			"input_schema": inputSchemaBytes,  // Serialized Arrow schema of parameters
@@ -527,7 +541,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		appMetadata := map[string]interface{}{
 			"type":         "table_function",
 			"schema":       schema.Name(),
-			"catalog":      "", // Empty catalog name
+			"catalog":      s.CatalogName(),
 			"name":         tableFuncInOut.Name(),
 			"comment":      tableFuncInOut.Comment(),
 			"input_schema": inputSchemaBytes,             // Serialized Arrow schema of parameters

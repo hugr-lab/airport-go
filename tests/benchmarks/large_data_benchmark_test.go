@@ -670,7 +670,9 @@ func (t *benchDynamicTable) Scan(ctx context.Context, opts *catalog.ScanOptions)
 	return array.NewRecordReader(t.schema, records)
 }
 
-func (t *benchDynamicTable) Insert(ctx context.Context, rows array.RecordReader) (*catalog.DMLResult, error) {
+var _ catalog.InsertableTable = (*benchDynamicTable)(nil)
+
+func (t *benchDynamicTable) Insert(ctx context.Context, rows array.RecordReader, opts *catalog.DMLOptions) (*catalog.DMLResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

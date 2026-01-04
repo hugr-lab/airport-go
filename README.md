@@ -243,51 +243,76 @@ See [examples/ddl](examples/ddl/) for a complete implementation.
 
 ## Filter Pushdown (Predicate Pushdown)
 
-DuckDB can push filter predicates to the server for optimized query execution. The `ScanOptions.Filter` field contains a serialized JSON expression representing the WHERE clause.
+DuckDB can push filter predicates to the server for optimized query execution. The `filter` package provides parsing and SQL encoding for DuckDB's filter JSON format:
 
 ```go
+import "github.com/hugr-lab/airport-go/filter"
+
 func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
     if opts.Filter != nil {
-        // Filter contains JSON-serialized predicate expression
-        // See: https://airport.query.farm/server_predicate_pushdown.html
+        // Parse filter JSON
+        fp, err := filter.Parse(opts.Filter)
+        if err != nil {
+            return nil, err
+        }
 
-        // Parse and apply filter to your data source
-        // This allows pushing filters to databases, APIs, etc.
+        // Encode to SQL WHERE clause
+        enc := filter.NewDuckDBEncoder(nil)
+        whereClause := enc.EncodeFilters(fp)
+        // Use whereClause with your database query
     }
     // Return filtered data...
 }
 ```
 
-The JSON filter format includes:
-- `filters`: Array of expression trees
-- `column_binding_names_by_index`: Maps column indices to names
+Supported expressions:
+- Comparisons: `=`, `<>`, `<`, `>`, `<=`, `>=`, `IN`, `NOT IN`, `BETWEEN`
+- Logical: `AND`, `OR`, `NOT`
+- Functions: `LOWER`, `UPPER`, `LENGTH`, etc.
+- Operators: `IS NULL`, `IS NOT NULL`
+- Type casts and CASE expressions
 
-Expression types:
-- `BOUND_COMPARISON`: Comparison operators (=, >, <, etc.)
-- `BOUND_COLUMN_REF`: Column references
-- `BOUND_CONSTANT`: Literal values with type info
-- `BOUND_CONJUNCTION`: Logical AND/OR operators
-- `BOUND_FUNCTION`: Function calls
+See [examples/filter](examples/filter/) for complete examples and [Airport Extension docs](https://airport.query.farm/server_predicate_pushdown.html) for filter format specification.
 
-**Note**: Currently, implementations must parse the raw JSON manually. Future versions will provide helper types and functions for filter interpretation.
+## Named Catalogs
 
-For detailed format specification, see the [Airport Extension documentation](https://airport.query.farm/server_predicate_pushdown.html).
+Implement `NamedCatalog` to give your catalog a name for DuckDB ATTACH statements:
+
+```go
+type MyCatalog struct { /* ... */ }
+
+func (c *MyCatalog) Name() string {
+    return "analytics"
+}
+
+// Also implement Catalog interface methods...
+```
+
+In DuckDB:
+
+```sql
+-- Server returns catalog name "analytics"
+ATTACH 'analytics' AS my_db (TYPE AIRPORT, LOCATION 'grpc://localhost:50051');
+
+SELECT * FROM my_db.schema.table;
+```
 
 ## Architecture
 
 The package follows an interface-based design:
 
 - **Catalog**: Top-level interface for querying schemas
+- **NamedCatalog**: Extends Catalog with a name for DuckDB ATTACH
 - **Schema**: Interface for querying tables and functions
 - **Table**: Interface providing Arrow schema and scan function
-- **ScalarFunction**: Interface for custom scalar functions
+- **ScalarFunction/TableFunction**: Interfaces for custom functions
 - **DynamicCatalog**: Extends Catalog with CREATE/DROP SCHEMA
 - **DynamicSchema**: Extends Schema with CREATE/DROP/RENAME TABLE
-- **DynamicTable**: Extends Table with ADD/DROP/RENAME COLUMN
+- **DynamicTable**: Extends Table with ADD/DROP/RENAME COLUMN and field operations
 - **DML Interfaces**:
   - `InsertableTable`: INSERT operations
-  - `UpdatableTable`/`UpdatableBatchTable`: UPDATE operations (batch interface recommended)
-  - `DeletableTable`/`DeletableBatchTable`: DELETE operations (batch interface recommended)
+  - `UpdatableTable`/`UpdatableBatchTable`: UPDATE operations (batch interface preferred)
+  - `DeletableTable`/`DeletableBatchTable`: DELETE operations (batch interface preferred)
 
 You can either:
 - Use `NewCatalogBuilder()` for static catalogs (quickest)
@@ -489,6 +514,7 @@ airport-go/
 ├── *.go                 # Root package files and unit tests
 ├── catalog/             # Catalog interfaces and types
 ├── auth/                # Authentication (bearer token)
+├── filter/              # Filter pushdown parsing and SQL encoding
 ├── flight/              # Flight server implementation
 ├── internal/            # Internal packages (serialization, etc.)
 ├── docs/                # Protocol and API documentation
@@ -501,7 +527,10 @@ airport-go/
 │   ├── auth/           # Authenticated server example
 │   ├── ddl/            # DDL operations (CREATE/DROP/ALTER)
 │   ├── dml/            # DML operations (INSERT/UPDATE/DELETE)
-│   └── dynamic/        # Dynamic catalog example
+│   ├── dynamic/        # Dynamic catalog example
+│   ├── filter/         # Filter pushdown example
+│   ├── functions/      # Scalar and table functions example
+│   └── timetravel/     # Time travel queries example
 └── tests/               # Tests (separate module, with DuckDB)
     ├── go.mod          # Tests module
     ├── integration/    # Integration tests

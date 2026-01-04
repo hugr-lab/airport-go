@@ -72,3 +72,10 @@ func (s *Server) SetTransactionManager(txManager catalog.TransactionManager) {
 func RegisterFlightServer(grpcServer *grpc.Server, flightServer *Server) {
 	flight.RegisterFlightServiceServer(grpcServer, flightServer)
 }
+
+func (s *Server) CatalogName() string {
+	if namedCat, ok := s.catalog.(catalog.NamedCatalog); ok {
+		return namedCat.Name()
+	}
+	return ""
+}
