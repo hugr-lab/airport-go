@@ -576,38 +576,3 @@ func (s *Server) handleTableFunction(ctx context.Context, stream flight.FlightSe
 
 	return nil
 }
-
-type syncReader struct {
-	array.RecordReader
-	writer *SchemaWriter
-	err    error
-	isInit bool
-	closed bool
-}
-
-func (sr *syncReader) Next() bool {
-	if sr.isInit {
-		if err := sr.writer.WriteFinished(); err != nil {
-			sr.err = err
-			return false
-		}
-	}
-	if !sr.isInit {
-		sr.isInit = true
-	}
-	if !sr.RecordReader.Next() {
-		return false
-	}
-	return true
-}
-
-func (sr *syncReader) Err() error {
-	if sr.err != nil {
-		return sr.err
-	}
-	return sr.RecordReader.Err()
-}
-
-func (sr *syncReader) Release() {
-	sr.writer.WriteFinished()
-}
