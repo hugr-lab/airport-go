@@ -12,10 +12,10 @@ import (
 func UnaryServerInterceptor(authenticator Authenticator) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
-		req interface{},
+		req any,
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
-	) (interface{}, error) {
+	) (any, error) {
 		// If no authenticator, skip auth
 		if authenticator == nil {
 			return handler(ctx, req)
@@ -27,15 +27,10 @@ func UnaryServerInterceptor(authenticator Authenticator) grpc.UnaryServerInterce
 			return nil, err
 		}
 
-		// If token is present, validate it
-		if token != "" {
-			ctx, err = ValidateToken(ctx, token, authenticator)
-			if err != nil {
-				return nil, err
-			}
+		ctx, err = ValidateToken(ctx, token, authenticator)
+		if err != nil {
+			return nil, err
 		}
-		// If no token and no error, allow unauthenticated access
-		// (authorization should happen at handler level)
 
 		return handler(ctx, req)
 	}
@@ -46,7 +41,7 @@ func UnaryServerInterceptor(authenticator Authenticator) grpc.UnaryServerInterce
 // If no authenticator is provided, requests pass through without auth.
 func StreamServerInterceptor(authenticator Authenticator) grpc.StreamServerInterceptor {
 	return func(
-		srv interface{},
+		srv any,
 		ss grpc.ServerStream,
 		info *grpc.StreamServerInfo,
 		handler grpc.StreamHandler,
@@ -64,15 +59,10 @@ func StreamServerInterceptor(authenticator Authenticator) grpc.StreamServerInter
 			return err
 		}
 
-		// If token is present, validate it
-		if token != "" {
-			ctx, err = ValidateToken(ctx, token, authenticator)
-			if err != nil {
-				return err
-			}
+		ctx, err = ValidateToken(ctx, token, authenticator)
+		if err != nil {
+			return err
 		}
-		// If no token and no error, allow unauthenticated access
-
 		// Wrap the stream with authenticated context
 		wrappedStream := &wrappedServerStream{
 			ServerStream: ss,
