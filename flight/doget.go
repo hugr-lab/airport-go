@@ -28,7 +28,7 @@ import (
 //  6. Respects context cancellation
 //  7. Propagates errors from scan function
 func (s *Server) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
-	ctx := stream.Context()
+	ctx := EnrichContextMetadata(stream.Context())
 
 	s.logger.Debug("DoGet called", "ticket_size", len(ticket.GetTicket()))
 

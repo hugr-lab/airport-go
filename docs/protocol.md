@@ -204,6 +204,48 @@ auth := airport.BearerAuth(func(token string) (string, error) {
 })
 ```
 
+## Multi-Catalog Support
+
+Airport supports serving multiple catalogs from a single server endpoint using
+the `airport-catalog` metadata header for request routing.
+
+### Catalog Routing
+
+When a multi-catalog server is configured:
+
+1. Client includes `airport-catalog` header in gRPC metadata
+2. Server extracts catalog name and routes to appropriate catalog handler
+3. If header is missing, request routes to the default catalog (empty name)
+
+```
+Client                                  Server
+  │                                       │
+  │──── Request + airport-catalog ───────>│
+  │     header: "sales"                   │
+  │                                       │──> Route to "sales" catalog
+  │<──── Response ────────────────────────│
+```
+
+### Metadata Headers
+
+| Header | Description | Required |
+|--------|-------------|----------|
+| `authorization` | Bearer token for authentication | Optional |
+| `airport-catalog` | Target catalog name for routing | Optional (defaults to empty) |
+| `airport-trace-id` | Distributed trace identifier | Optional |
+| `airport-client-session-id` | Client session identifier | Optional |
+
+### Catalog-Aware Authorization
+
+For multi-catalog deployments, authenticators can implement per-catalog authorization:
+
+1. `Authenticate(token)` validates the bearer token
+2. `AuthorizeCatalog(ctx, catalogName)` checks if user can access the catalog
+3. Returns `PermissionDenied` if catalog access is not allowed
+
+This separation allows fine-grained access control where users may have
+access to some catalogs but not others.
+
 ## Column Projection
 
 Airport supports column projection to minimize data transfer:

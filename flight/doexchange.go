@@ -53,7 +53,7 @@ import (
 // - UPDATE: https://airport.query.farm/table_update.html
 // - DELETE: https://airport.query.farm/table_delete.html
 func (s *Server) DoExchange(stream flight.FlightService_DoExchangeServer) error {
-	ctx := stream.Context()
+	ctx := EnrichContextMetadata(stream.Context())
 
 	// Extract metadata from gRPC headers
 	md, ok := metadata.FromIncomingContext(ctx)

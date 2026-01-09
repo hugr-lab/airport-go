@@ -8,7 +8,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"google.golang.org/grpc"
 
-	"github.com/hugr-lab/airport-go/auth"
 	"github.com/hugr-lab/airport-go/flight"
 )
 
@@ -111,13 +110,11 @@ func validateConfig(config ServerConfig) error {
 func ServerOptions(config ServerConfig) []grpc.ServerOption {
 	var opts []grpc.ServerOption
 
-	// Add auth interceptors if authenticator is provided
-	if config.Auth != nil {
-		opts = append(opts,
-			grpc.UnaryInterceptor(auth.UnaryServerInterceptor(config.Auth)),
-			grpc.StreamInterceptor(auth.StreamServerInterceptor(config.Auth)),
-		)
-	}
+	// Add auth interceptors
+	opts = append(opts,
+		grpc.UnaryInterceptor(flight.UnaryServerInterceptor(config.Auth)),
+		grpc.StreamInterceptor(flight.StreamServerInterceptor(config.Auth)),
+	)
 
 	// Add max message size if specified
 	if config.MaxMessageSize > 0 {

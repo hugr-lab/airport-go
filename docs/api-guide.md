@@ -890,6 +890,94 @@ lis, _ := net.Listen("tcp", ":50051")
 grpcServer.Serve(lis)
 ```
 
+### MultiCatalogServerConfig
+
+For servers that need to serve multiple catalogs, use `MultiCatalogServerConfig`:
+
+```go
+type MultiCatalogServerConfig struct {
+    // Catalogs is the list of initial catalogs to serve. Optional (can be empty).
+    // Each catalog should implement catalog.NamedCatalog for routing.
+    // Catalog names must be unique (including empty string for default).
+    // Additional catalogs can be added at runtime via AddCatalog().
+    Catalogs []catalog.Catalog
+
+    // Allocator for Arrow memory management. Optional, defaults to DefaultAllocator.
+    Allocator memory.Allocator
+
+    // Logger for server events. Optional, defaults to slog with Info level.
+    Logger *slog.Logger
+
+    // LogLevel sets the minimum log level. Optional, defaults to Info.
+    // Only used if Logger is nil.
+    LogLevel *slog.Level
+
+    // Address is the server's public address for FlightEndpoint locations.
+    // Optional, defaults to reuse connection.
+    Address string
+
+    // TransactionManager coordinates transactions across catalogs. Optional.
+    // Must implement CatalogTransactionManager for multi-catalog support.
+    TransactionManager catalog.CatalogTransactionManager
+
+    // Auth is the authenticator for validating requests. Optional.
+    // If the authenticator also implements CatalogAuthorizer, AuthorizeCatalog
+    // is called after Authenticate to perform per-catalog authorization.
+    Auth auth.Authenticator
+
+    // MaxMessageSize is the maximum gRPC message size. Optional.
+    MaxMessageSize int
+}
+```
+
+### Creating a Multi-Catalog Server
+
+```go
+// Define catalogs (must implement catalog.NamedCatalog)
+salesCatalog := NewSalesCatalog()      // Name() returns "sales"
+analyticsCatalog := NewAnalyticsCatalog() // Name() returns "analytics"
+
+// Create server configuration
+config := airport.MultiCatalogServerConfig{
+    Catalogs: []catalog.Catalog{salesCatalog, analyticsCatalog},
+    Auth:     myCatalogAwareAuth, // Optional: implements CatalogAuthorizer
+}
+
+// Create gRPC server with options
+opts := airport.MultiCatalogServerOptions(config)
+grpcServer := grpc.NewServer(opts...)
+
+// Register multi-catalog Airport service
+// Returns *MultiCatalogServer which can be used to add/remove catalogs at runtime
+mcs, err := airport.NewMultiCatalogServer(grpcServer, config)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Dynamic catalog management (can be called while server is running):
+//
+// Add a new catalog at runtime:
+//   newCatalog := NewInventoryCatalog() // Must implement catalog.NamedCatalog
+//   if err := mcs.AddCatalog(newCatalog); err != nil {
+//       log.Printf("Failed to add catalog: %v", err)
+//   }
+//
+// Remove a catalog by name:
+//   if err := mcs.RemoveCatalog("inventory"); err != nil {
+//       log.Printf("Failed to remove catalog: %v", err)
+//   }
+//
+// Note: In-flight requests to a removed catalog complete normally.
+// New requests to the removed catalog receive NotFound error.
+
+// Start serving
+lis, _ := net.Listen("tcp", ":50051")
+grpcServer.Serve(lis)
+```
+
+Clients specify the target catalog via the `airport-catalog` gRPC metadata header.
+If no header is provided, the request is routed to the default catalog (empty name).
+
 ## Authentication
 
 ### Authenticator Interface
@@ -899,6 +987,60 @@ type Authenticator interface {
     // Authenticate validates credentials and returns an identity.
     // Returns ErrUnauthorized if credentials are invalid.
     Authenticate(ctx context.Context, token string) (string, error)
+}
+```
+
+### CatalogAuthorizer Interface
+
+For multi-catalog servers, authenticators can implement `CatalogAuthorizer` to provide
+per-catalog authorization:
+
+```go
+type CatalogAuthorizer interface {
+    // AuthorizeCatalog authorizes access to a specific catalog.
+    // Called after successful Authenticate() to check catalog-level permissions.
+    // Parameters:
+    //   - ctx: Request context with identity already set from Authenticate()
+    //   - catalog: Target catalog name (empty string for default)
+    // Returns:
+    //   - ctx: Potentially enriched context (e.g., with catalog-specific claims)
+    //   - err: Non-nil if authorization fails (returns gRPC PermissionDenied status)
+    AuthorizeCatalog(ctx context.Context, catalog string) (context.Context, error)
+}
+```
+
+**Example Implementation:**
+
+```go
+type MultiCatalogAuth struct {
+    // userCatalogs maps user identity to allowed catalog names
+    userCatalogs map[string][]string
+}
+
+func (a *MultiCatalogAuth) Authenticate(ctx context.Context, token string) (string, error) {
+    // Validate token and return identity
+    identity, ok := a.validateToken(token)
+    if !ok {
+        return "", auth.ErrUnauthenticated
+    }
+    return identity, nil
+}
+
+func (a *MultiCatalogAuth) AuthorizeCatalog(ctx context.Context, catalogName string) (context.Context, error) {
+    identity := auth.IdentityFromContext(ctx)
+
+    allowedCatalogs, ok := a.userCatalogs[identity]
+    if !ok {
+        return ctx, errors.New("user has no catalog access")
+    }
+
+    for _, allowed := range allowedCatalogs {
+        if allowed == catalogName {
+            return ctx, nil // Access granted
+        }
+    }
+
+    return ctx, fmt.Errorf("user %s cannot access catalog %s", identity, catalogName)
 }
 ```
 
@@ -922,7 +1064,7 @@ auth := nil
 ```go
 func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
     // Get authenticated identity from context
-    identity := airport.IdentityFromContext(ctx)
+    identity := auth.IdentityFromContext(ctx)
     if identity != "" {
         // User is authenticated
     }
@@ -947,15 +1089,50 @@ projected := catalog.ProjectSchema(fullSchema, []string{"id", "name"})
 ### Context Helpers
 
 ```go
-// Get identity from context
-identity := airport.IdentityFromContext(ctx)
+// Get identity from context (auth package)
+identity := auth.IdentityFromContext(ctx)
 
-// Get transaction ID from context
+// Get transaction ID from context (catalog package)
 txID, ok := catalog.TransactionIDFromContext(ctx)
 
 // Add transaction ID to context
 ctx = catalog.WithTransactionID(ctx, txID)
 ```
+
+### Request Metadata (flight package)
+
+The `flight` package provides helpers for accessing gRPC metadata from request context:
+
+```go
+import "github.com/hugr-lab/airport-go/flight"
+
+// Get catalog name from request metadata (airport-catalog header)
+catalogName := flight.CatalogNameFromContext(ctx)
+
+// Get trace ID from request metadata (airport-trace-id header)
+traceID := flight.TraceIDFromContext(ctx)
+
+// Get session ID from request metadata (airport-client-session-id header)
+sessionID := flight.SessionIDFromContext(ctx)
+
+// Get authorization header value
+authHeader := flight.AuthorizationFromContext(ctx)
+
+// Get all metadata at once
+meta := flight.MetaFromContext(ctx)
+if meta != nil {
+    fmt.Printf("Catalog: %s, TraceID: %s\n", meta.CatalogName, meta.TraceID)
+}
+```
+
+**Metadata Headers:**
+
+| Header | Description | Context Helper |
+|--------|-------------|----------------|
+| `authorization` | Bearer token for authentication | `AuthorizationFromContext()` |
+| `airport-catalog` | Target catalog name for routing | `CatalogNameFromContext()` |
+| `airport-trace-id` | Distributed trace identifier | `TraceIDFromContext()` |
+| `airport-client-session-id` | Client session identifier | `SessionIDFromContext()` |
 
 ### Error Types
 
