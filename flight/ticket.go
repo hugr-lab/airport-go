@@ -28,8 +28,7 @@ type TicketData struct {
 
 	// FunctionParams are the parameters for table function execution (optional)
 	// Only valid when TableFunction is set
-	// Parameters are serialized as JSON-compatible values
-	FunctionParams []any `json:"function_params,omitempty"`
+	FunctionParams []byte `json:"function_params,omitempty"`
 
 	// TimePointUnit specifies time granularity for time-travel queries (optional)
 	// Valid values: "timestamp", "timestamp_ns", "version", etc.
@@ -48,10 +47,10 @@ type TicketData struct {
 	Filters []byte `json:"filters,omitempty"`
 }
 
-// EncodeTicket creates an opaque ticket from schema and table names.
+// EncodeTableTicket creates an opaque ticket from schema and table names.
 // The ticket is JSON-encoded for simplicity and transparency.
 // Returns error if encoding fails.
-func EncodeTicket(catalog, schema, table string) ([]byte, error) {
+func EncodeTableTicket(catalog, schema, table string) ([]byte, error) {
 	if schema == "" {
 		return nil, fmt.Errorf("schema name cannot be empty")
 	}
@@ -111,6 +110,16 @@ func DecodeTicket(ticketBytes []byte) (*TicketData, error) {
 	}
 
 	return &ticket, nil
+}
+
+// Encode serializes TicketData into an opaque ticket byte slice (json).
+// Returns error if encoding fails.
+func (td *TicketData) Encode() ([]byte, error) {
+	data, err := json.Marshal(td)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode ticket data: %w", err)
+	}
+	return data, nil
 }
 
 // ToScanOptions converts TicketData to catalog.ScanOptions with time-travel support.

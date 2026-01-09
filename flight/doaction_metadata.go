@@ -288,21 +288,19 @@ func (s *Server) parseDescriptor(data string) (*flight.FlightDescriptor, error) 
 // createTableFunctionTicket creates a ticket for table function execution.
 func (s *Server) createTableFunctionTicket(ctx context.Context, schemaName, functionName string, request *endpointsRequest) ([]byte, error) {
 	paramBytes := []byte(request.Parameters.TableFunctionParameters)
-	s.logger.Debug("Parsing table function parameters",
-		"param_size", len(paramBytes),
-		"first_bytes", fmt.Sprintf("%x", paramBytes[:min(20, len(paramBytes))]),
-	)
-
-	params, err := s.extractFunctionParams(paramBytes)
-	if err != nil {
-		return nil, err
-	}
-
 	ticketData := TicketData{
 		Catalog:        s.CatalogName(),
 		Schema:         schemaName,
 		TableFunction:  functionName,
-		FunctionParams: params,
+		FunctionParams: paramBytes,
+	}
+	s.logger.Debug("Parsing table function parameters",
+		"param_size", len(paramBytes),
+		"first_bytes", fmt.Sprintf("%x", paramBytes[:min(20, len(paramBytes))]),
+	)
+	params, err := s.extractFunctionParams(paramBytes)
+	if err != nil {
+		return nil, err
 	}
 
 	ticketData.Columns = s.resolveTableFunctionColumns(ctx, schemaName, functionName, params, request.Parameters.ColumnIDs)

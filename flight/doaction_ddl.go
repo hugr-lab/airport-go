@@ -1729,7 +1729,7 @@ func (s *Server) buildTableFlightInfo(_ context.Context, schema catalog.Schema, 
 	}
 
 	// Generate ticket for this table
-	ticket, err := EncodeTicket(s.CatalogName(), schema.Name(), table.Name())
+	ticket, err := EncodeTableTicket(s.CatalogName(), schema.Name(), table.Name())
 	if err != nil {
 		return nil, err
 	}

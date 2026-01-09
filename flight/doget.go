@@ -280,14 +280,20 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 			ticketData.Schema, ticketData.TableFunction)
 	}
 
+	params, err := s.extractFunctionParams(ticketData.FunctionParams)
+	if err != nil {
+		s.logger.Error("Failed to extract parameters", "error", err)
+		return nil, nil, status.Errorf(codes.InvalidArgument, "failed to extract parameters: %v", err)
+	}
+
 	s.logger.Debug("Executing table function",
 		"schema", ticketData.Schema,
 		"function", ticketData.TableFunction,
-		"param_count", len(ticketData.FunctionParams),
+		"param_count", len(params),
 	)
 
 	// Get the full schema for these parameters (dynamic schema based on params)
-	fullSchema, err := targetFunc.SchemaForParameters(ctx, ticketData.FunctionParams)
+	fullSchema, err := targetFunc.SchemaForParameters(ctx, params)
 	if err != nil {
 		s.logger.Error("Failed to get function schema",
 			"schema", ticketData.Schema,
@@ -318,7 +324,7 @@ func (s *Server) executeTableFunction(ctx context.Context, schema catalog.Schema
 	// Execute the table function
 	// Function can use scanOpts.Columns to optimize (e.g., skip computing unused columns)
 	// but must return full schema - DuckDB handles projection client-side
-	reader, err := targetFunc.Execute(ctx, ticketData.FunctionParams, scanOpts)
+	reader, err := targetFunc.Execute(ctx, params, scanOpts)
 	if err != nil {
 		s.logger.Error("Table function execution failed",
 			"schema", ticketData.Schema,

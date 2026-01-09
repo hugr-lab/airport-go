@@ -24,7 +24,7 @@ import (
 // Request format (MessagePack):
 // buildTableFunctionFlightInfo creates a FlightInfo response for a table function.
 // This is the common response structure for both regular and in/out table functions.
-func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, params []any, funcSchema *arrow.Schema) (*flight.Result, error) {
+func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, params []byte, funcSchema *arrow.Schema) (*flight.Result, error) {
 	// Create ticket with function call information
 	ticketData := TicketData{
 		Schema:         schemaName,
@@ -71,44 +71,15 @@ func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, p
 	return &flight.Result{Body: flightInfoBytes}, nil
 }
 
-// decodeTableFunctionParameters extracts parameter values from Arrow IPC encoded bytes.
-// Returns a slice of any values, one per parameter.
-func decodeTableFunctionParameters(paramBytes []byte) ([]any, error) {
-	if len(paramBytes) == 0 {
-		return []any{}, nil
-	}
-
-	paramReader, err := ipc.NewReader(bytes.NewReader(paramBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize parameter record batch: %w", err)
-	}
-	defer paramReader.Release()
-
-	// Read the parameter record
-	if !paramReader.Next() {
-		return nil, fmt.Errorf("no parameter record found")
-	}
-	paramRecord := paramReader.RecordBatch()
-
-	// Extract parameter values from the record batch
-	// Each column in the record batch represents one parameter value
-	params := make([]any, paramRecord.NumCols())
-	for i := 0; i < int(paramRecord.NumCols()); i++ {
-		col := paramRecord.Column(i)
-		// Get the first value from each column (parameters are single values, not arrays)
-		if col.Len() == 0 || col.IsNull(0) {
-			params[i] = nil
-		} else {
-			params[i] = extractScalarValue(col, 0)
-		}
-	}
-
-	return params, nil
-}
-
 // handleRegularTableFunction handles FlightInfo request for regular table functions.
 // These functions take scalar parameters and return a table.
-func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, functionName string, params []any, fn catalog.TableFunction, stream flight.FlightService_DoActionServer) error {
+func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, functionName string, paramsRaw []byte, fn catalog.TableFunction, stream flight.FlightService_DoActionServer) error {
+	params, err := s.extractFunctionParams(paramsRaw)
+	if err != nil {
+		s.logger.Error("Failed to decode parameters", "error", err)
+		return status.Errorf(codes.InvalidArgument, "failed to decode parameters: %v", err)
+	}
+
 	funcSchema, err := fn.SchemaForParameters(ctx, params)
 	if err != nil {
 		s.logger.Error("Failed to get function schema",
@@ -119,7 +90,7 @@ func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, fun
 		return status.Errorf(codes.Internal, "failed to get function schema: %v", err)
 	}
 
-	result, err := s.buildTableFunctionFlightInfo(schemaName, functionName, params, funcSchema)
+	result, err := s.buildTableFunctionFlightInfo(schemaName, functionName, paramsRaw, funcSchema)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
@@ -139,7 +110,7 @@ func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, fun
 
 // handleInOutTableFunction handles FlightInfo request for in/out table functions.
 // These functions accept row sets as input and return transformed rows.
-func (s *Server) handleInOutTableFunction(ctx context.Context, schemaName, functionName string, params []any, tableInputSchemaBytes []byte, fn catalog.TableFunctionInOut, stream flight.FlightService_DoActionServer) error {
+func (s *Server) handleInOutTableFunction(ctx context.Context, schemaName, functionName string, paramsRaw []byte, tableInputSchemaBytes []byte, fn catalog.TableFunctionInOut, stream flight.FlightService_DoActionServer) error {
 	// Parse the table input schema
 	var inputSchema *arrow.Schema
 	if len(tableInputSchemaBytes) > 0 {
@@ -149,6 +120,12 @@ func (s *Server) handleInOutTableFunction(ctx context.Context, schemaName, funct
 		}
 		defer schemaReader.Release()
 		inputSchema = schemaReader.Schema()
+	}
+
+	params, err := s.extractFunctionParams(paramsRaw)
+	if err != nil {
+		s.logger.Error("Failed to extract parameters", "error", err)
+		return status.Errorf(codes.InvalidArgument, "failed to extract parameters: %v", err)
 	}
 
 	funcSchema, err := fn.SchemaForParameters(ctx, params, inputSchema)
@@ -161,7 +138,7 @@ func (s *Server) handleInOutTableFunction(ctx context.Context, schemaName, funct
 		return status.Errorf(codes.Internal, "failed to get function schema: %v", err)
 	}
 
-	result, err := s.buildTableFunctionFlightInfo(schemaName, functionName, params, funcSchema)
+	result, err := s.buildTableFunctionFlightInfo(schemaName, functionName, paramsRaw, funcSchema)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
@@ -269,23 +246,17 @@ func (s *Server) handleTableFunctionFlightInfo(ctx context.Context, action *flig
 	}
 
 	// Decode parameters from Arrow IPC format
-	params, err := decodeTableFunctionParameters(request.Parameters)
-	if err != nil {
-		s.logger.Error("Failed to decode parameters", "error", err)
-		return status.Errorf(codes.InvalidArgument, "failed to decode parameters: %v", err)
-	}
-
 	s.logger.Debug("Getting schema for table function",
 		"schema", schemaName,
 		"function", functionName,
 		"is_in_out", isInOut,
-		"param_count", len(params),
-		"params", params,
+		"parameters_size", len(request.Parameters),
+		"table_input_schema_size", len(request.TableInputSchema),
 	)
 
 	// Route to appropriate handler based on function type
 	if isInOut {
-		return s.handleInOutTableFunction(ctx, schemaName, functionName, params, request.TableInputSchema, targetFuncInOut, stream)
+		return s.handleInOutTableFunction(ctx, schemaName, functionName, request.Parameters, request.TableInputSchema, targetFuncInOut, stream)
 	}
-	return s.handleRegularTableFunction(ctx, schemaName, functionName, params, targetFunc, stream)
+	return s.handleRegularTableFunction(ctx, schemaName, functionName, request.Parameters, targetFunc, stream)
 }
