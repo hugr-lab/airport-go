@@ -661,23 +661,23 @@ func extractScalarValue(arr arrow.Array, idx int) any {
 
 	switch a := arr.(type) {
 	case *array.Int8:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Int16:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Int32:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Int64:
 		return a.Value(idx)
 	case *array.Uint8:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Uint16:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Uint32:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Uint64:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Float32:
-		return float64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Float64:
 		return a.Value(idx)
 	case *array.String:
@@ -736,7 +736,7 @@ func extractScalarValue(arr arrow.Array, idx int) any {
 		}
 		return result
 	default:
-		// For unsupported types, return nil
+		// For unsupported types, return the array itself
 		return nil
 	}
 }

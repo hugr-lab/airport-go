@@ -26,7 +26,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(42)
 				return b.NewArray()
 			},
-			expected: int64(42),
+			expected: int8(42),
 		},
 		{
 			name: "Int16",
@@ -36,7 +36,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(1000)
 				return b.NewArray()
 			},
-			expected: int64(1000),
+			expected: int16(1000),
 		},
 		{
 			name: "Int32",
@@ -46,7 +46,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(100000)
 				return b.NewArray()
 			},
-			expected: int64(100000),
+			expected: int32(100000),
 		},
 		{
 			name: "Int64",
@@ -66,7 +66,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(255)
 				return b.NewArray()
 			},
-			expected: int64(255),
+			expected: uint8(255),
 		},
 		{
 			name: "Uint16",
@@ -76,7 +76,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(65535)
 				return b.NewArray()
 			},
-			expected: int64(65535),
+			expected: uint16(65535),
 		},
 		{
 			name: "Uint32",
@@ -86,7 +86,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(4294967295)
 				return b.NewArray()
 			},
-			expected: int64(4294967295),
+			expected: uint32(4294967295),
 		},
 		{
 			name: "Uint64",
@@ -96,7 +96,7 @@ func TestExtractScalarValue_Integers(t *testing.T) {
 				b.Append(1844674407370955161)
 				return b.NewArray()
 			},
-			expected: int64(1844674407370955161),
+			expected: uint64(1844674407370955161),
 		},
 	}
 
@@ -124,8 +124,8 @@ func TestExtractScalarValue_Floats(t *testing.T) {
 		defer arr.Release()
 
 		result := extractScalarValue(arr, 0)
-		if v, ok := result.(float64); !ok || v < 3.13 || v > 3.15 {
-			t.Errorf("expected ~3.14, got %v", result)
+		if v, ok := result.(float32); !ok || v < 3.13 || v > 3.15 {
+			t.Errorf("expected ~3.14 (float32), got %v (%T)", result, result)
 		}
 	})
 
