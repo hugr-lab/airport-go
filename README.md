@@ -10,7 +10,8 @@ A high-level Go package for building Apache Arrow Flight servers compatible with
 - **Simple API**: Build a Flight server in under 30 lines of code
 - **Fluent Catalog Builder**: Define schemas, tables, and functions with method chaining
 - **Dynamic Catalogs**: Implement custom catalog logic for live schema reflection
-- **Bearer Token Auth**: Built-in authentication support
+- **Multi-Catalog Server**: Serve multiple catalogs from a single endpoint with dynamic add/remove
+- **Bearer Token Auth**: Built-in authentication with per-catalog authorization support
 - **Streaming Efficiency**: No rebatching - preserves Arrow batch sizes from your data sources
 - **Context Cancellation**: Respects client disconnections and timeouts
 - **gRPC Integration**: Registers on your existing `grpc.Server` - you control lifecycle and TLS
@@ -297,6 +298,56 @@ ATTACH 'analytics' AS my_db (TYPE AIRPORT, LOCATION 'grpc://localhost:50051');
 SELECT * FROM my_db.schema.table;
 ```
 
+## Multi-Catalog Server
+
+Serve multiple catalogs from a single endpoint with dynamic management:
+
+```go
+// Create named catalogs
+type SalesCatalog struct { /* ... */ }
+func (c *SalesCatalog) Name() string { return "sales" }
+
+type AnalyticsCatalog struct { /* ... */ }
+func (c *AnalyticsCatalog) Name() string { return "analytics" }
+
+// Create multi-catalog server
+config := airport.MultiCatalogServerConfig{
+    Catalogs: []catalog.Catalog{&SalesCatalog{}, &AnalyticsCatalog{}},
+}
+
+opts := airport.MultiCatalogServerOptions(config)
+grpcServer := grpc.NewServer(opts...)
+
+// Returns *MultiCatalogServer for dynamic management
+mcs, _ := airport.NewMultiCatalogServer(grpcServer, config)
+
+// Add/remove catalogs at runtime
+mcs.AddCatalog(&InventoryCatalog{})
+mcs.RemoveCatalog("inventory")
+```
+
+Clients specify the target catalog via the `airport-catalog` gRPC metadata header.
+Requests without the header route to the default catalog (empty name).
+
+For per-catalog authorization, implement `auth.CatalogAuthorizer`:
+
+```go
+type MultiCatalogAuth struct{}
+
+func (a *MultiCatalogAuth) Authenticate(ctx context.Context, token string) (string, error) {
+    // Validate token, return identity
+    return "user1", nil
+}
+
+func (a *MultiCatalogAuth) AuthorizeCatalog(ctx context.Context, catalogName string) (context.Context, error) {
+    identity := auth.IdentityFromContext(ctx)
+    // Check if identity can access catalogName
+    return ctx, nil
+}
+```
+
+See [examples/multicatalog](examples/multicatalog/) for a complete implementation.
+
 ## Architecture
 
 The package follows an interface-based design:
@@ -309,6 +360,8 @@ The package follows an interface-based design:
 - **DynamicCatalog**: Extends Catalog with CREATE/DROP SCHEMA
 - **DynamicSchema**: Extends Schema with CREATE/DROP/RENAME TABLE
 - **DynamicTable**: Extends Table with ADD/DROP/RENAME COLUMN and field operations
+- **MultiCatalogServer**: Serves multiple catalogs from a single endpoint
+- **CatalogAuthorizer**: Per-catalog authorization interface
 - **DML Interfaces**:
   - `InsertableTable`: INSERT operations
   - `UpdatableTable`/`UpdatableBatchTable`: UPDATE operations (batch interface preferred)
@@ -317,6 +370,7 @@ The package follows an interface-based design:
 You can either:
 - Use `NewCatalogBuilder()` for static catalogs (quickest)
 - Implement the `Catalog` interface for dynamic catalogs
+- Use `NewMultiCatalogServer()` to serve multiple catalogs from one endpoint
 - Implement `DynamicCatalog`/`DynamicSchema`/`DynamicTable` for DDL support
 
 ## Documentation
@@ -530,6 +584,7 @@ airport-go/
 │   ├── dynamic/        # Dynamic catalog example
 │   ├── filter/         # Filter pushdown example
 │   ├── functions/      # Scalar and table functions example
+│   ├── multicatalog/   # Multi-catalog server with dynamic add/remove
 │   └── timetravel/     # Time travel queries example
 └── tests/               # Tests (separate module, with DuckDB)
     ├── go.mod          # Tests module
