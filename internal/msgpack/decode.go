@@ -21,7 +21,7 @@ import (
 //
 //	var params QueryParams
 //	err := msgpack.Decode(data, &params)
-func Decode(data []byte, v interface{}) error {
+func Decode(data []byte, v any) error {
 	if len(data) == 0 {
 		return fmt.Errorf("empty MessagePack data")
 	}
@@ -43,7 +43,7 @@ func Decode(data []byte, v interface{}) error {
 //	    Table:  "users",
 //	}
 //	data, err := msgpack.Encode(params)
-func Encode(v interface{}) ([]byte, error) {
+func Encode(v any) ([]byte, error) {
 	data, err := msgpack.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode MessagePack: %w", err)

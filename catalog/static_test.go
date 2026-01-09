@@ -396,13 +396,13 @@ func (m *mockTableFunc) Signature() FunctionSignature {
 	}
 }
 
-func (m *mockTableFunc) SchemaForParameters(ctx context.Context, params []interface{}) (*arrow.Schema, error) {
+func (m *mockTableFunc) SchemaForParameters(ctx context.Context, params []any) (*arrow.Schema, error) {
 	return arrow.NewSchema([]arrow.Field{
 		{Name: "result", Type: arrow.BinaryTypes.String},
 	}, nil), nil
 }
 
-func (m *mockTableFunc) Execute(ctx context.Context, params []interface{}, opts *ScanOptions) (array.RecordReader, error) {
+func (m *mockTableFunc) Execute(ctx context.Context, params []any, opts *ScanOptions) (array.RecordReader, error) {
 	schema, _ := m.SchemaForParameters(ctx, params)
 	return testScanFunc(schema)(ctx, opts)
 }

@@ -29,7 +29,7 @@ type TicketData struct {
 	// FunctionParams are the parameters for table function execution (optional)
 	// Only valid when TableFunction is set
 	// Parameters are serialized as JSON-compatible values
-	FunctionParams []interface{} `json:"function_params,omitempty"`
+	FunctionParams []any `json:"function_params,omitempty"`
 
 	// TimePointUnit specifies time granularity for time-travel queries (optional)
 	// Valid values: "timestamp", "timestamp_ns", "version", etc.

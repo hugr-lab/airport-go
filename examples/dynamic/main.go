@@ -171,7 +171,7 @@ type LiveTable struct {
 	name    string
 	comment string
 	schema  *arrow.Schema
-	getData func() [][]interface{} // Function that returns current data
+	getData func() [][]any // Function that returns current data
 }
 
 func (t *LiveTable) Name() string {
@@ -231,10 +231,10 @@ func main() {
 		name:    "metrics",
 		comment: "Live server metrics",
 		schema:  metricsSchema,
-		getData: func() [][]interface{} {
+		getData: func() [][]any {
 			// Return current metrics
 			elapsed := time.Since(startTime).Seconds()
-			return [][]interface{}{
+			return [][]any{
 				{time.Now().Unix(), "uptime_seconds", int64(elapsed)},
 				{time.Now().Unix(), "request_count", int64(100)},
 			}
@@ -257,8 +257,8 @@ func main() {
 		name:    "settings",
 		comment: "Server configuration",
 		schema:  adminTableSchema,
-		getData: func() [][]interface{} {
-			return [][]interface{}{
+		getData: func() [][]any {
+			return [][]any{
 				{"max_connections", "1000"},
 				{"log_level", "info"},
 			}

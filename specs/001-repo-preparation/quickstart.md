@@ -224,7 +224,7 @@ func (s *Server) handleCreateSchema(body []byte, stream flight.FlightService_DoA
     if existing != nil {
         if action.IfNotExists {
             // Idempotent: return success
-            return s.sendActionResult(stream, map[string]interface{}{
+            return s.sendActionResult(stream, map[string]any{
                 "status":      "success",
                 "schema_name": action.SchemaName,
             })
@@ -236,13 +236,13 @@ func (s *Server) handleCreateSchema(body []byte, stream flight.FlightService_DoA
     // This is a placeholder - actual implementation depends on catalog
     // TODO: Add CreateSchema method to catalog.Catalog interface
 
-    return s.sendActionResult(stream, map[string]interface{}{
+    return s.sendActionResult(stream, map[string]any{
         "status":      "success",
         "schema_name": action.SchemaName,
     })
 }
 
-func (s *Server) sendActionResult(stream flight.FlightService_DoActionServer, data interface{}) error {
+func (s *Server) sendActionResult(stream flight.FlightService_DoActionServer, data any) error {
     jsonData, err := json.Marshal(data)
     if err != nil {
         return status.Errorf(codes.Internal, "failed to marshal result: %v", err)

@@ -229,7 +229,7 @@ func (s *Server) handleCreateSchemaAction(ctx context.Context, action *flight.Ac
 	}
 
 	// Build AirportSerializedContentsWithSHA256Hash response
-	response := map[string]interface{}{
+	response := map[string]any{
 		"sha256":     sha256Hash,
 		"url":        nil,
 		"serialized": []byte(serializedContents),
@@ -1705,7 +1705,7 @@ func (s *Server) buildTableFlightInfo(_ context.Context, schema catalog.Schema, 
 	}
 
 	// Create Flight app_metadata matching AirportSerializedFlightAppMetadata
-	appMetadata := map[string]interface{}{
+	appMetadata := map[string]any{
 		"type":         "table",
 		"schema":       schema.Name(),
 		"catalog":      s.CatalogName(),

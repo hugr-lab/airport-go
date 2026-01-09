@@ -263,7 +263,7 @@ func insertData(ctx context.Context, addr string) error {
     client := flight.NewFlightServiceClient(conn)
 
     // Build INSERT descriptor
-    desc := map[string]interface{}{
+    desc := map[string]any{
         "operation":   "insert",
         "schema_name": "analytics",
         "table_name":  "events",
@@ -317,7 +317,7 @@ func deleteData(ctx context.Context, addr string, rowIDs []int64) error {
     client := flight.NewFlightServiceClient(conn)
 
     // Build DELETE action
-    body, _ := json.Marshal(map[string]interface{}{
+    body, _ := json.Marshal(map[string]any{
         "schema_name": "analytics",
         "table_name":  "events",
         "row_ids":     rowIDs,

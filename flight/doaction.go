@@ -288,7 +288,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		}
 
 		// Create Flight app_metadata matching AirportSerializedFlightAppMetadata
-		appMetadata := map[string]interface{}{
+		appMetadata := map[string]any{
 			"type":         "table",
 			"schema":       schema.Name(),
 			"catalog":      s.CatalogName(),
@@ -368,7 +368,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		outputSchema := arrow.NewSchema([]arrow.Field{}, nil)
 
 		// Create Flight app_metadata for table function
-		appMetadata := map[string]interface{}{
+		appMetadata := map[string]any{
 			"type":         "table_function",
 			"schema":       schema.Name(),
 			"catalog":      s.CatalogName(),
@@ -448,7 +448,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		}, nil)
 
 		// Create Flight app_metadata for scalar function
-		appMetadata := map[string]interface{}{
+		appMetadata := map[string]any{
 			"type":         "scalar_function",
 			"schema":       schema.Name(),
 			"catalog":      s.CatalogName(),
@@ -538,7 +538,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		outputSchema := arrow.NewSchema([]arrow.Field{}, nil)
 
 		// Create Flight app_metadata for table function (in/out)
-		appMetadata := map[string]interface{}{
+		appMetadata := map[string]any{
 			"type":         "table_function",
 			"schema":       schema.Name(),
 			"catalog":      s.CatalogName(),
@@ -612,7 +612,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 	}
 
 	// Wrap in AirportSerializedCompressedContent format: [length, data]
-	compressedContent := []interface{}{
+	compressedContent := []any{
 		uint32(len(uncompressed)),
 		string(compressed),
 	}

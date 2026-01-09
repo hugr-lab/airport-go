@@ -1464,10 +1464,10 @@ func (t *duckDBDMLTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (a
 	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }
 
-func (t *duckDBDMLTable) convertData() [][]interface{} {
-	result := make([][]interface{}, len(t.data))
+func (t *duckDBDMLTable) convertData() [][]any {
+	result := make([][]any, len(t.data))
 	for i, row := range t.data {
-		result[i] = make([]interface{}, len(row))
+		result[i] = make([]any, len(row))
 		copy(result[i], row)
 	}
 	return result

@@ -150,7 +150,7 @@ func simpleCatalog() catalog.Catalog {
 		{Name: "email", Type: arrow.BinaryTypes.String},
 	}, nil)
 
-	usersData := [][]interface{}{
+	usersData := [][]any{
 		{int64(1), "Alice", "alice@example.com"},
 		{int64(2), "Bob", "bob@example.com"},
 		{int64(3), "Charlie", "charlie@example.com"},
@@ -163,7 +163,7 @@ func simpleCatalog() catalog.Catalog {
 		{Name: "price", Type: arrow.PrimitiveTypes.Float64},
 	}, nil)
 
-	productsData := [][]interface{}{
+	productsData := [][]any{
 		{int64(101), "Widget", 9.99},
 		{int64(102), "Gadget", 19.99},
 		{int64(103), "Doohickey", 29.99},
@@ -202,7 +202,7 @@ func authenticatedCatalog() catalog.Catalog {
 		{Name: "value", Type: arrow.BinaryTypes.String},
 	}, nil)
 
-	secretsData := [][]interface{}{
+	secretsData := [][]any{
 		{"api_key", "secret123"},
 		{"db_password", "pass456"},
 	}
@@ -242,7 +242,7 @@ func testAuthHandler() airport.Authenticator {
 }
 
 // buildTestRecord creates an Arrow record from test data.
-func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBatch {
+func buildTestRecord(schema *arrow.Schema, data [][]any) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
 
@@ -293,7 +293,7 @@ func buildTestRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBat
 }
 
 // makeScanFunc creates a ScanFunc from in-memory data.
-func makeScanFunc(schema *arrow.Schema, data [][]interface{}) catalog.ScanFunc {
+func makeScanFunc(schema *arrow.Schema, data [][]any) catalog.ScanFunc {
 	return func(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 		record := buildTestRecord(schema, data)
 		defer record.Release()

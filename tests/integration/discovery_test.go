@@ -43,7 +43,7 @@ func TestListSchemas(t *testing.T) {
 
 	// Parse compressed response (Airport format)
 	// AirportSerializedCompressedContent is encoded as ARRAY: [length, data]
-	var compressedContent []interface{}
+	var compressedContent []any
 	if err := msgpack.Decode(result.Body, &compressedContent); err != nil {
 		t.Fatalf("failed to decode compressed content: %v", err)
 	}

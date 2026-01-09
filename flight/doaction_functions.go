@@ -24,7 +24,7 @@ import (
 // Request format (MessagePack):
 // buildTableFunctionFlightInfo creates a FlightInfo response for a table function.
 // This is the common response structure for both regular and in/out table functions.
-func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, params []interface{}, funcSchema *arrow.Schema) (*flight.Result, error) {
+func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, params []any, funcSchema *arrow.Schema) (*flight.Result, error) {
 	// Create ticket with function call information
 	ticketData := TicketData{
 		Schema:         schemaName,
@@ -72,10 +72,10 @@ func (s *Server) buildTableFunctionFlightInfo(schemaName, functionName string, p
 }
 
 // decodeTableFunctionParameters extracts parameter values from Arrow IPC encoded bytes.
-// Returns a slice of interface{} values, one per parameter.
-func decodeTableFunctionParameters(paramBytes []byte) ([]interface{}, error) {
+// Returns a slice of any values, one per parameter.
+func decodeTableFunctionParameters(paramBytes []byte) ([]any, error) {
 	if len(paramBytes) == 0 {
-		return []interface{}{}, nil
+		return []any{}, nil
 	}
 
 	paramReader, err := ipc.NewReader(bytes.NewReader(paramBytes))
@@ -92,11 +92,11 @@ func decodeTableFunctionParameters(paramBytes []byte) ([]interface{}, error) {
 
 	// Extract parameter values from the record batch
 	// Each column in the record batch represents one parameter value
-	params := make([]interface{}, paramRecord.NumCols())
+	params := make([]any, paramRecord.NumCols())
 	for i := 0; i < int(paramRecord.NumCols()); i++ {
 		col := paramRecord.Column(i)
 		// Get the first value from each column (parameters are single values, not arrays)
-		if col.Len() == 0 {
+		if col.Len() == 0 || col.IsNull(0) {
 			params[i] = nil
 		} else {
 			params[i] = extractScalarValue(col, 0)
@@ -108,7 +108,7 @@ func decodeTableFunctionParameters(paramBytes []byte) ([]interface{}, error) {
 
 // handleRegularTableFunction handles FlightInfo request for regular table functions.
 // These functions take scalar parameters and return a table.
-func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, functionName string, params []interface{}, fn catalog.TableFunction, stream flight.FlightService_DoActionServer) error {
+func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, functionName string, params []any, fn catalog.TableFunction, stream flight.FlightService_DoActionServer) error {
 	funcSchema, err := fn.SchemaForParameters(ctx, params)
 	if err != nil {
 		s.logger.Error("Failed to get function schema",
@@ -139,7 +139,7 @@ func (s *Server) handleRegularTableFunction(ctx context.Context, schemaName, fun
 
 // handleInOutTableFunction handles FlightInfo request for in/out table functions.
 // These functions accept row sets as input and return transformed rows.
-func (s *Server) handleInOutTableFunction(ctx context.Context, schemaName, functionName string, params []interface{}, tableInputSchemaBytes []byte, fn catalog.TableFunctionInOut, stream flight.FlightService_DoActionServer) error {
+func (s *Server) handleInOutTableFunction(ctx context.Context, schemaName, functionName string, params []any, tableInputSchemaBytes []byte, fn catalog.TableFunctionInOut, stream flight.FlightService_DoActionServer) error {
 	// Parse the table input schema
 	var inputSchema *arrow.Schema
 	if len(tableInputSchemaBytes) > 0 {
