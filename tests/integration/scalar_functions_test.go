@@ -280,7 +280,7 @@ func TestFunctionErrors(t *testing.T) {
 			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 		}, nil)
 
-		testData := [][]interface{}{{int64(1)}, {int64(2)}, {int64(3)}}
+		testData := [][]any{{int64(1)}, {int64(2)}, {int64(3)}}
 
 		cat, err := airport.NewCatalogBuilder().
 			Schema("some_schema").
@@ -344,7 +344,7 @@ func TestTypeMismatch(t *testing.T) {
 			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 		}, nil)
 
-		testData := [][]interface{}{{int64(1)}, {int64(2)}}
+		testData := [][]any{{int64(1)}, {int64(2)}}
 
 		cat, err := airport.NewCatalogBuilder().
 			Schema("some_schema").
@@ -396,7 +396,7 @@ func TestTypeMismatch(t *testing.T) {
 
 // TestScalarFunctionDataTypes tests scalar functions with different Arrow data types.
 func TestScalarFunctionDataTypes(t *testing.T) {
-	testData := [][]interface{}{
+	testData := [][]any{
 		{int64(10), int64(5), 2.5, 3.0, "hello", "world"},
 		{int64(-5), int64(3), 1.5, 2.0, "foo", "bar"},
 		{int64(0), int64(0), 0.0, 0.0, "test", "case"},
@@ -1124,7 +1124,7 @@ func catalogWithScalarFunctions() catalog.Catalog {
 		{Name: "name", Type: arrow.BinaryTypes.String},
 	}, nil)
 
-	usersData := [][]interface{}{
+	usersData := [][]any{
 		{int64(1), "alice"},
 		{int64(2), "bob"},
 		{int64(3), "charlie"},

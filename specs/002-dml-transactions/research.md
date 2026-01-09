@@ -70,7 +70,7 @@ if descriptor.Returning {
     writer.Write(returningBatch)
     writer.Close()
 
-    result := map[string]interface{}{
+    result := map[string]any{
         "status": "success",
         "affected_rows": affectedRows,
         "returning_data": buf.Bytes(),

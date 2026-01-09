@@ -72,7 +72,9 @@ go work sync
 
 ## Code Style
 
-- Follow idiomatic Go style (gofmt, golangci-lint)
+- Follow [Uber Go Style Guide](https://github.com/uber-go/guide/blob/master/style.md)
+- Use `any` instead of `interface{}` for empty interface types
+- Avoid `else` blocks - prefer early returns with `if` checks; `else` is acceptable for simple cases (3-5 lines inside condition blocks)
 - All public APIs must have godoc comments
 - No silent failures - errors must be handled explicitly
 

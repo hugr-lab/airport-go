@@ -345,8 +345,8 @@ type timeTravelTable struct {
 	comment  string
 	schemaV1 *arrow.Schema
 	schemaV2 *arrow.Schema
-	dataV1   [][]interface{}
-	dataV2   [][]interface{}
+	dataV1   [][]any
+	dataV2   [][]any
 	time2    time.Time
 }
 
@@ -377,7 +377,7 @@ func (t *timeTravelTable) SchemaForRequest(ctx context.Context, req *catalog.Sch
 func (t *timeTravelTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
 	// Determine which version to return based on timestamp
 	var schema *arrow.Schema
-	var data [][]interface{}
+	var data [][]any
 
 	if opts.TimePoint != nil {
 		requestTime := t.parseTimePoint(opts.TimePoint)
@@ -448,14 +448,14 @@ func timeTravelCatalog() catalog.Catalog {
 	}, nil)
 
 	// Data at time1 (3 users, no phone column)
-	dataV1 := [][]interface{}{
+	dataV1 := [][]any{
 		{int64(1), "Alice", "alice@example.com"},
 		{int64(2), "Bob", "bob@example.com"},
 		{int64(3), "Charlie", "charlie@example.com"},
 	}
 
 	// Data at time2 (4 users, with phone column)
-	dataV2 := [][]interface{}{
+	dataV2 := [][]any{
 		{int64(1), "Alice", "alice@example.com", "555-0001"},
 		{int64(2), "Bob", "bob@updated.com", "555-0002"}, // Email updated
 		{int64(3), "Charlie", "charlie@example.com", "555-0003"},

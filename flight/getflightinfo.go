@@ -78,7 +78,7 @@ func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescripto
 	}
 
 	// Generate ticket
-	ticket, err := EncodeTicket(s.CatalogName(), schemaName, tableName)
+	ticket, err := EncodeTableTicket(s.CatalogName(), schemaName, tableName)
 	if err != nil {
 		s.logger.Error("Failed to encode ticket",
 			"schema", schemaName,

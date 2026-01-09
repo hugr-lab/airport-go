@@ -133,7 +133,7 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 
 	// Prepare app_metadata - same structure as regular tables
 	// Time travel info is encoded in the ticket, not in app_metadata
-	appMetadata, _ := msgpack.Encode(map[string]interface{}{
+	appMetadata, _ := msgpack.Encode(map[string]any{
 		"type":         "table",
 		"schema":       schema.Name(),
 		"catalog":      s.CatalogName(),
@@ -288,21 +288,19 @@ func (s *Server) parseDescriptor(data string) (*flight.FlightDescriptor, error) 
 // createTableFunctionTicket creates a ticket for table function execution.
 func (s *Server) createTableFunctionTicket(ctx context.Context, schemaName, functionName string, request *endpointsRequest) ([]byte, error) {
 	paramBytes := []byte(request.Parameters.TableFunctionParameters)
-	s.logger.Debug("Parsing table function parameters",
-		"param_size", len(paramBytes),
-		"first_bytes", fmt.Sprintf("%x", paramBytes[:min(20, len(paramBytes))]),
-	)
-
-	params, err := s.extractFunctionParams(paramBytes)
-	if err != nil {
-		return nil, err
-	}
-
 	ticketData := TicketData{
 		Catalog:        s.CatalogName(),
 		Schema:         schemaName,
 		TableFunction:  functionName,
-		FunctionParams: params,
+		FunctionParams: paramBytes,
+	}
+	s.logger.Debug("Parsing table function parameters",
+		"param_size", len(paramBytes),
+		"first_bytes", fmt.Sprintf("%x", paramBytes[:min(20, len(paramBytes))]),
+	)
+	params, err := s.extractFunctionParams(paramBytes)
+	if err != nil {
+		return nil, err
 	}
 
 	ticketData.Columns = s.resolveTableFunctionColumns(ctx, schemaName, functionName, params, request.Parameters.ColumnIDs)
@@ -548,7 +546,7 @@ func (s *Server) handleCreateTransaction(ctx context.Context, action *flight.Act
 
 	// If no TransactionManager is configured, return nil identifier
 	if s.txManager == nil {
-		response := map[string]interface{}{
+		response := map[string]any{
 			"identifier": nil,
 		}
 
@@ -574,7 +572,7 @@ func (s *Server) handleCreateTransaction(ctx context.Context, action *flight.Act
 		return status.Errorf(codes.Internal, "failed to create transaction: %v", err)
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"identifier": txID,
 	}
 
@@ -612,7 +610,7 @@ func (s *Server) handleGetTransactionStatus(ctx context.Context, action *flight.
 
 	// If no TransactionManager is configured, return not found
 	if s.txManager == nil {
-		response := map[string]interface{}{
+		response := map[string]any{
 			"status": "",
 			"exists": false,
 		}
@@ -634,7 +632,7 @@ func (s *Server) handleGetTransactionStatus(ctx context.Context, action *flight.
 	// Get transaction status
 	state, exists := s.txManager.GetTransactionStatus(ctx, params.TransactionID)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status": string(state),
 		"exists": exists,
 	}
@@ -655,31 +653,31 @@ func (s *Server) handleGetTransactionStatus(ctx context.Context, action *flight.
 }
 
 // extractScalarValue extracts a scalar value from an Arrow array at the given index.
-// This is used to convert Arrow array values to Go interface{} values for function parameters.
-func extractScalarValue(arr arrow.Array, idx int) interface{} {
+// This is used to convert Arrow array values to Go any values for function parameters.
+func extractScalarValue(arr arrow.Array, idx int) any {
 	if arr.IsNull(idx) {
 		return nil
 	}
 
 	switch a := arr.(type) {
 	case *array.Int8:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Int16:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Int32:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Int64:
 		return a.Value(idx)
 	case *array.Uint8:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Uint16:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Uint32:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Uint64:
-		return int64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Float32:
-		return float64(a.Value(idx))
+		return a.Value(idx)
 	case *array.Float64:
 		return a.Value(idx)
 	case *array.String:
@@ -688,8 +686,57 @@ func extractScalarValue(arr arrow.Array, idx int) interface{} {
 		return a.Value(idx)
 	case *array.Boolean:
 		return a.Value(idx)
+	case *array.Date32:
+		// Return as time.Time (days since Unix epoch)
+		return a.Value(idx).ToTime()
+	case *array.Date64:
+		// Return as time.Time (milliseconds since Unix epoch)
+		return a.Value(idx).ToTime()
+	case *array.Timestamp:
+		// Return as time.Time
+		return a.Value(idx).ToTime(a.DataType().(*arrow.TimestampType).Unit)
+	case *array.Time32:
+		// Return as int32 (seconds or milliseconds since midnight depending on unit)
+		return int32(a.Value(idx))
+	case *array.Time64:
+		// Return as int64 (microseconds or nanoseconds since midnight depending on unit)
+		return int64(a.Value(idx))
+	case *array.Decimal128:
+		// Return as string representation for precision
+		return a.Value(idx).ToString(a.DataType().(*arrow.Decimal128Type).Scale)
+	case *array.List:
+		// Return as slice of values
+		start, end := a.ValueOffsets(idx)
+		values := a.ListValues()
+		result := make([]any, end-start)
+		for i := start; i < end; i++ {
+			result[i-start] = extractScalarValue(values, int(i))
+		}
+		return result
+	case *array.Struct:
+		// Return as map of field name -> value
+		structType := a.DataType().(*arrow.StructType)
+		result := make(map[string]any, a.NumField())
+		for i := 0; i < a.NumField(); i++ {
+			fieldName := structType.Field(i).Name
+			result[fieldName] = extractScalarValue(a.Field(i), idx)
+		}
+		return result
+	case *array.Map:
+		// Return as map[any]any
+		// Map is stored as List of Structs with "key" and "value" fields
+		start, end := a.ValueOffsets(idx)
+		keys := a.Keys()
+		items := a.Items()
+		result := make(map[any]any, end-start)
+		for i := start; i < end; i++ {
+			key := extractScalarValue(keys, int(i))
+			value := extractScalarValue(items, int(i))
+			result[key] = value
+		}
+		return result
 	default:
-		// For unsupported types, return nil
+		// For unsupported types, return the array itself
 		return nil
 	}
 }

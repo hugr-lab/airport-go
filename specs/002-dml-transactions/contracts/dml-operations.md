@@ -237,7 +237,7 @@ func insertRows(ctx context.Context, client flight.FlightServiceClient,
     schema, table string, data arrow.RecordBatch) (int64, error) {
 
     // Build descriptor
-    desc := map[string]interface{}{
+    desc := map[string]any{
         "operation": "insert",
         "schema_name": schema,
         "table_name": table,
@@ -284,7 +284,7 @@ func deleteWithTx(ctx context.Context, client flight.FlightServiceClient,
     // Build action
     action := &flight.Action{
         Type: "delete",
-        Body: mustJSON(map[string]interface{}{
+        Body: mustJSON(map[string]any{
             "schema_name": schema,
             "table_name": table,
             "row_ids": rowIDs,
