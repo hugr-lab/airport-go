@@ -280,7 +280,7 @@ func allTypesTestCatalog() catalog.Catalog {
 		{Name: "timestamp_col", Type: arrow.FixedWidthTypes.Timestamp_us},
 	}, nil)
 
-	allTypesData := [][]interface{}{
+	allTypesData := [][]any{
 		{
 			true, int8(127), int16(32767), int32(2147483647), int64(9223372036854775807),
 			uint8(255), uint16(65535), uint32(4294967295), uint64(18446744073709551615),
@@ -351,7 +351,7 @@ func geometryTestCatalog() catalog.Catalog {
 		panic(err)
 	}
 
-	geomData := [][]interface{}{
+	geomData := [][]any{
 		{int64(1), pointWKB},
 		{int64(2), linestringWKB},
 		{int64(3), polygonWKB},
@@ -391,7 +391,7 @@ func uuidTestCatalog() catalog.Catalog {
 		0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00,
 	}
 
-	uuidData := [][]interface{}{
+	uuidData := [][]any{
 		{int64(1), uuidBytes},
 	}
 
@@ -423,7 +423,7 @@ func jsonTestCatalog() catalog.Catalog {
 		})},
 	}, nil)
 
-	jsonData := [][]interface{}{
+	jsonData := [][]any{
 		{int64(1), `{"name": "Alice", "age": 30, "city": "NYC"}`},
 		{int64(2), `{"name": "Bob", "age": 25, "city": "LA"}`},
 	}
@@ -475,7 +475,7 @@ func hugeintTestCatalog() catalog.Catalog {
 		uhugeBytes[i] = 0x00
 	}
 
-	hugeintData := [][]interface{}{
+	hugeintData := [][]any{
 		{int64(1), hugeBytes, uhugeBytes},
 	}
 

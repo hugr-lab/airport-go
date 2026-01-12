@@ -12,7 +12,7 @@ import (
 // decodeTableFunctionParams extracts function parameters from msgpack-encoded metadata.
 // The metadata contains a map with a "parameters" field that can be in multiple formats:
 // - []byte: msgpack-encoded array
-// - []interface{}: direct array
+// - []any: direct array
 // - string: Arrow IPC-encoded RecordBatch
 func decodeTableFunctionParams(appMetadata []byte, logger *slog.Logger) []any {
 	if len(appMetadata) == 0 {
@@ -42,8 +42,8 @@ func decodeTableFunctionParams(appMetadata []byte, logger *slog.Logger) []any {
 }
 
 // decodeMsgpackMap decodes msgpack-encoded bytes into a map.
-func decodeMsgpackMap(data []byte, logger *slog.Logger) (map[string]interface{}, error) {
-	var paramMap map[string]interface{}
+func decodeMsgpackMap(data []byte, logger *slog.Logger) (map[string]any, error) {
+	var paramMap map[string]any
 	if err := msgpack.Decode(data, &paramMap); err != nil {
 		logger.Warn("Failed to decode parameters as map",
 			"error", err,
@@ -63,11 +63,11 @@ func decodeMsgpackMap(data []byte, logger *slog.Logger) (map[string]interface{},
 }
 
 // extractParameters extracts parameter array from various formats.
-func extractParameters(paramsVal interface{}, logger *slog.Logger) []any {
+func extractParameters(paramsVal any, logger *slog.Logger) []any {
 	switch v := paramsVal.(type) {
 	case []byte:
 		return extractParamsFromBytes(v, logger)
-	case []interface{}:
+	case []any:
 		return extractParamsFromArray(v, logger)
 	case string:
 		return extractParamsFromArrowIPC(v, logger)
@@ -83,7 +83,7 @@ func extractParameters(paramsVal interface{}, logger *slog.Logger) []any {
 func extractParamsFromBytes(paramsBytes []byte, logger *slog.Logger) []any {
 	logger.Debug("Parameters is bytes, attempting msgpack decode", "len", len(paramsBytes))
 
-	var paramArray []interface{}
+	var paramArray []any
 	if err := msgpack.Decode(paramsBytes, &paramArray); err != nil {
 		logger.Warn("Failed to decode parameters bytes as msgpack array", "error", err)
 		return []any{}
@@ -97,7 +97,7 @@ func extractParamsFromBytes(paramsBytes []byte, logger *slog.Logger) []any {
 }
 
 // extractParamsFromArray returns the parameter array directly.
-func extractParamsFromArray(paramsArray []interface{}, logger *slog.Logger) []any {
+func extractParamsFromArray(paramsArray []any, logger *slog.Logger) []any {
 	logger.Debug("Extracted parameters array",
 		"param_count", len(paramsArray),
 		"params", paramsArray,

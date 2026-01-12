@@ -133,7 +133,7 @@ type liveTable struct {
 	name    string
 	comment string
 	schema  *arrow.Schema
-	getData func() [][]interface{}
+	getData func() [][]any
 }
 
 func (t *liveTable) Name() string {
@@ -241,11 +241,11 @@ func TestLiveData(t *testing.T) {
 		name:    "metrics",
 		comment: "Live metrics",
 		schema:  metricsSchema,
-		getData: func() [][]interface{} {
+		getData: func() [][]any {
 			counterMu.Lock()
 			defer counterMu.Unlock()
 			counter++
-			return [][]interface{}{
+			return [][]any{
 				{"scan_count", int64(counter)},
 			}
 		},
@@ -326,7 +326,7 @@ func TestDynamicTables(t *testing.T) {
 			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 		}, nil)
 
-		testData := [][]interface{}{{int64(1)}}
+		testData := [][]any{{int64(1)}}
 
 		newTable := catalog.NewStaticTable(
 			"test_table",
@@ -360,7 +360,7 @@ func TestConcurrentCatalogAccess(t *testing.T) {
 		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
 	}, nil)
 
-	testData := [][]interface{}{{int64(1)}}
+	testData := [][]any{{int64(1)}}
 
 	table := catalog.NewStaticTable(
 		"test",

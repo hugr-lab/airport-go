@@ -103,7 +103,7 @@ func createSampleCatalog() (catalog.Catalog, error) {
 		{Name: "message", Type: arrow.BinaryTypes.String},
 	}, nil)
 
-	data := [][]interface{}{
+	data := [][]any{
 		{int64(1), "Secure connection established"},
 		{int64(2), "TLS encryption active"},
 	}
@@ -124,7 +124,7 @@ func createSampleCatalog() (catalog.Catalog, error) {
 }
 
 // buildRecord creates an Arrow record from test data.
-func buildRecord(schema *arrow.Schema, data [][]interface{}) arrow.RecordBatch {
+func buildRecord(schema *arrow.Schema, data [][]any) arrow.RecordBatch {
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
 	defer builder.Release()
 

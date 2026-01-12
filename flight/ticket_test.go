@@ -26,7 +26,7 @@ func TestEncodeDecodeTicket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Encode
-			encoded, err := EncodeTicket("", tt.schema, tt.table)
+			encoded, err := EncodeTableTicket("", tt.schema, tt.table)
 			if err != nil {
 				t.Fatalf("EncodeTicket() error = %v", err)
 			}
@@ -247,7 +247,7 @@ func TestEncodeTicketValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := EncodeTicket("", tt.schema, tt.table)
+			_, err := EncodeTableTicket("", tt.schema, tt.table)
 
 			if (err != nil) != tt.wantError {
 				t.Errorf("EncodeTicket() error = %v, wantError %v", err, tt.wantError)

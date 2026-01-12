@@ -410,10 +410,10 @@ func (t *batchDMLTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (ar
 	return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
 }
 
-func (t *batchDMLTable) convertData() [][]interface{} {
-	result := make([][]interface{}, len(t.data))
+func (t *batchDMLTable) convertData() [][]any {
+	result := make([][]any, len(t.data))
 	for i, row := range t.data {
-		result[i] = make([]interface{}, len(row))
+		result[i] = make([]any, len(row))
 		copy(result[i], row)
 	}
 	return result

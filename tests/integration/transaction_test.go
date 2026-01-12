@@ -147,7 +147,7 @@ func TestCreateTransaction(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request body
-	requestBody, err := msgpack.Encode(map[string]interface{}{
+	requestBody, err := msgpack.Encode(map[string]any{
 		"catalog_name": "",
 	})
 	if err != nil {
@@ -208,7 +208,7 @@ func TestGetTransactionStatus(t *testing.T) {
 	}
 
 	// Create request body
-	requestBody, err := msgpack.Encode(map[string]interface{}{
+	requestBody, err := msgpack.Encode(map[string]any{
 		"transaction_id": txID,
 	})
 	if err != nil {
@@ -258,7 +258,7 @@ func TestGetTransactionStatusNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request body with non-existent transaction ID
-	requestBody, err := msgpack.Encode(map[string]interface{}{
+	requestBody, err := msgpack.Encode(map[string]any{
 		"transaction_id": "non-existent-tx-id",
 	})
 	if err != nil {
@@ -339,7 +339,7 @@ func TestTransactionWithoutManager(t *testing.T) {
 	ctx := context.Background()
 
 	// Create request body
-	requestBody, err := msgpack.Encode(map[string]interface{}{
+	requestBody, err := msgpack.Encode(map[string]any{
 		"catalog_name": "",
 	})
 	if err != nil {
@@ -385,7 +385,7 @@ func TestDMLWithTransaction(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a transaction first
-	createReq, _ := msgpack.Encode(map[string]interface{}{"catalog_name": ""})
+	createReq, _ := msgpack.Encode(map[string]any{"catalog_name": ""})
 	createAction := &flight.Action{Type: "create_transaction", Body: createReq}
 
 	stream, err := env.client.DoAction(ctx, createAction)

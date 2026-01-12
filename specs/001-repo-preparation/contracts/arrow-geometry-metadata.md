@@ -396,11 +396,11 @@ func TestDuckDBGeometryIntegration(t *testing.T) {
     require.NoError(t, err)
 
     // Verify geometry metadata in GeoParquet
-    verifyGeoParquetMetadata(t, "test_places.parquet", map[string]interface{}{
+    verifyGeoParquetMetadata(t, "test_places.parquet", map[string]any{
         "version":        "1.1.0",
         "primary_column": "location",
-        "columns": map[string]interface{}{
-            "location": map[string]interface{}{
+        "columns": map[string]any{
+            "location": map[string]any{
                 "encoding":       "WKB",
                 "geometry_types": []string{"Point"},
             },
@@ -458,7 +458,7 @@ func TestGeometryFieldMetadata(t *testing.T) {
 
     // Verify CRS is valid JSON
     extMetadata := field.Metadata.Get("ARROW:extension:metadata")
-    var metadata map[string]interface{}
+    var metadata map[string]any
     err := json.Unmarshal([]byte(extMetadata), &metadata)
     require.NoError(t, err)
 

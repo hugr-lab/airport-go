@@ -140,9 +140,9 @@ func (s *DynamicSchema) canAccess(identity string) bool {
 metricsTable := &LiveTable{
     name:   "metrics",
     schema: metricsSchema,
-    getData: func() [][]interface{} {
+    getData: func() [][]any {
         // Return current metrics on each query
-        return [][]interface{}{
+        return [][]any{
             {time.Now().Unix(), "uptime_seconds", int64(elapsed)},
         }
     },
