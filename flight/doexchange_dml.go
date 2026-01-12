@@ -44,9 +44,6 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 		"return_data", returnData,
 	)
 
-	// Get transaction context
-	ctx = s.getTransactionContext(ctx)
-
 	// Look up schema
 	schema, err := s.catalog.Schema(ctx, schemaName)
 	if err != nil {
@@ -262,9 +259,6 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		"return_data", returnData,
 	)
 
-	// Get transaction context
-	ctx = s.getTransactionContext(ctx)
-
 	// Look up schema
 	schema, err := s.catalog.Schema(ctx, schemaName)
 	if err != nil {
@@ -459,9 +453,6 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		"table", tableName,
 		"return_data", returnData,
 	)
-
-	// Get transaction context
-	ctx = s.getTransactionContext(ctx)
 
 	// Look up schema
 	schema, err := s.catalog.Schema(ctx, schemaName)

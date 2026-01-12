@@ -53,7 +53,7 @@ import (
 // - UPDATE: https://airport.query.farm/table_update.html
 // - DELETE: https://airport.query.farm/table_delete.html
 func (s *Server) DoExchange(stream flight.FlightService_DoExchangeServer) error {
-	ctx := stream.Context()
+	ctx := EnrichContextMetadata(stream.Context())
 
 	// Extract metadata from gRPC headers
 	md, ok := metadata.FromIncomingContext(ctx)
@@ -265,8 +265,9 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 
 			// Validate output has same number of rows as input
 			if res.Len() != int(inLen) {
+				len := res.Len()
 				res.Release()
-				return fmt.Errorf("output rows must match input rows, expected %d got %d", inLen, res.Len())
+				return fmt.Errorf("output rows must match input rows, expected %d got %d", inLen, len)
 			}
 
 			// Validate output array type matches function signature return type

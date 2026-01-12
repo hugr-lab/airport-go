@@ -69,13 +69,21 @@ func (s *Server) SetTransactionManager(txManager catalog.TransactionManager) {
 
 // RegisterFlightServer registers the Flight service on the provided gRPC server.
 // This follows the standard gRPC service registration pattern.
-func RegisterFlightServer(grpcServer *grpc.Server, flightServer *Server) {
+func RegisterFlightServer(grpcServer *grpc.Server, flightServer flight.FlightServer) {
 	flight.RegisterFlightServiceServer(grpcServer, flightServer)
 }
 
+// CatalogName returns the name of the catalog if it implements NamedCatalog.
+// Returns empty string if the catalog has no name.
 func (s *Server) CatalogName() string {
 	if namedCat, ok := s.catalog.(catalog.NamedCatalog); ok {
 		return namedCat.Name()
 	}
 	return ""
+}
+
+// Catalog returns the underlying catalog instance.
+// Used by MultiCatalogServer to access catalog metadata for routing.
+func (s *Server) Catalog() catalog.Catalog {
+	return s.catalog
 }

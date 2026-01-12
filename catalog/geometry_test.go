@@ -441,3 +441,342 @@ func TestDecodeGeometry_Errors(t *testing.T) {
 		t.Error("expected error decoding invalid WKB, got nil")
 	}
 }
+
+func TestGeometryBuilder(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	t.Run("basic usage", func(t *testing.T) {
+		builder := NewGeometryBuilder(mem)
+		defer builder.Release()
+
+		// Append various geometry types
+		points := []orb.Geometry{
+			orb.Point{1.0, 2.0},
+			orb.Point{3.0, 4.0},
+			orb.LineString{{0, 0}, {1, 1}, {2, 2}},
+		}
+
+		for _, geom := range points {
+			if err := builder.Append(geom); err != nil {
+				t.Fatalf("Append() failed: %v", err)
+			}
+		}
+
+		arr := builder.NewGeometryArray()
+		defer arr.Release()
+
+		if arr.Len() != 3 {
+			t.Errorf("expected 3 elements, got %d", arr.Len())
+		}
+
+		// Verify first point
+		geom, err := arr.Value(0)
+		if err != nil {
+			t.Fatalf("Value(0) failed: %v", err)
+		}
+		pt, ok := geom.(orb.Point)
+		if !ok {
+			t.Fatalf("expected orb.Point, got %T", geom)
+		}
+		if pt[0] != 1.0 || pt[1] != 2.0 {
+			t.Errorf("expected Point{1, 2}, got %v", pt)
+		}
+
+		// Verify third element is a LineString
+		geom, err = arr.Value(2)
+		if err != nil {
+			t.Fatalf("Value(2) failed: %v", err)
+		}
+		_, ok = geom.(orb.LineString)
+		if !ok {
+			t.Fatalf("expected orb.LineString, got %T", geom)
+		}
+	})
+
+	t.Run("AppendWKB", func(t *testing.T) {
+		builder := NewGeometryBuilder(mem)
+		defer builder.Release()
+
+		// Pre-encode geometry to WKB
+		point := orb.Point{5.0, 6.0}
+		wkbBytes, err := EncodeGeometry(point)
+		if err != nil {
+			t.Fatalf("EncodeGeometry() failed: %v", err)
+		}
+
+		builder.AppendWKB(wkbBytes)
+
+		arr := builder.NewGeometryArray()
+		defer arr.Release()
+
+		if arr.Len() != 1 {
+			t.Errorf("expected 1 element, got %d", arr.Len())
+		}
+
+		geom, err := arr.Value(0)
+		if err != nil {
+			t.Fatalf("Value(0) failed: %v", err)
+		}
+		pt, ok := geom.(orb.Point)
+		if !ok {
+			t.Fatalf("expected orb.Point, got %T", geom)
+		}
+		if pt[0] != 5.0 || pt[1] != 6.0 {
+			t.Errorf("expected Point{5, 6}, got %v", pt)
+		}
+	})
+
+	t.Run("AppendNull", func(t *testing.T) {
+		builder := NewGeometryBuilder(mem)
+		defer builder.Release()
+
+		if err := builder.Append(orb.Point{1, 2}); err != nil {
+			t.Fatalf("Append() failed: %v", err)
+		}
+		builder.AppendNull()
+		if err := builder.Append(orb.Point{3, 4}); err != nil {
+			t.Fatalf("Append() failed: %v", err)
+		}
+
+		arr := builder.NewGeometryArray()
+		defer arr.Release()
+
+		if arr.Len() != 3 {
+			t.Errorf("expected 3 elements, got %d", arr.Len())
+		}
+
+		// First element should be valid
+		if arr.IsNull(0) {
+			t.Error("expected element 0 to be valid")
+		}
+
+		// Second element should be null
+		if !arr.IsNull(1) {
+			t.Error("expected element 1 to be null")
+		}
+
+		// Third element should be valid
+		if arr.IsNull(2) {
+			t.Error("expected element 2 to be valid")
+		}
+
+		// Value(1) should return nil for null
+		geom, err := arr.Value(1)
+		if err != nil {
+			t.Fatalf("Value(1) failed: %v", err)
+		}
+		if geom != nil {
+			t.Errorf("expected nil for null value, got %v", geom)
+		}
+	})
+
+	t.Run("AppendValues with validity mask", func(t *testing.T) {
+		builder := NewGeometryBuilder(mem)
+		defer builder.Release()
+
+		geoms := []orb.Geometry{
+			orb.Point{1, 1},
+			orb.Point{2, 2},
+			orb.Point{3, 3},
+			orb.Point{4, 4},
+		}
+		valid := []bool{true, false, true, false}
+
+		if err := builder.AppendValues(geoms, valid); err != nil {
+			t.Fatalf("AppendValues() failed: %v", err)
+		}
+
+		arr := builder.NewGeometryArray()
+		defer arr.Release()
+
+		if arr.Len() != 4 {
+			t.Errorf("expected 4 elements, got %d", arr.Len())
+		}
+
+		// Check validity
+		expectedValidity := []bool{true, false, true, false}
+		for i, expected := range expectedValidity {
+			isNull := arr.IsNull(i)
+			if isNull == expected {
+				t.Errorf("element %d: expected IsNull=%v, got %v", i, !expected, isNull)
+			}
+		}
+	})
+
+	t.Run("AppendValues without validity mask", func(t *testing.T) {
+		builder := NewGeometryBuilder(mem)
+		defer builder.Release()
+
+		geoms := []orb.Geometry{
+			orb.Point{1, 1},
+			orb.Point{2, 2},
+		}
+
+		// nil validity means all valid
+		if err := builder.AppendValues(geoms, nil); err != nil {
+			t.Fatalf("AppendValues() failed: %v", err)
+		}
+
+		arr := builder.NewGeometryArray()
+		defer arr.Release()
+
+		if arr.Len() != 2 {
+			t.Errorf("expected 2 elements, got %d", arr.Len())
+		}
+
+		for i := 0; i < arr.Len(); i++ {
+			if arr.IsNull(i) {
+				t.Errorf("element %d should not be null", i)
+			}
+		}
+	})
+
+	t.Run("AppendValues error on mismatched lengths", func(t *testing.T) {
+		builder := NewGeometryBuilder(mem)
+		defer builder.Release()
+
+		geoms := []orb.Geometry{orb.Point{1, 1}, orb.Point{2, 2}}
+		valid := []bool{true} // Wrong length
+
+		err := builder.AppendValues(geoms, valid)
+		if err == nil {
+			t.Error("expected error for mismatched lengths, got nil")
+		}
+	})
+}
+
+func TestGeometryBuilder_WithRecordBuilder(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	// Create schema with geometry field
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		NewGeometryField("location", true, 4326, "Point"),
+	}, nil)
+
+	// Create record builder
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	// Get builders - the geometry field should automatically use GeometryBuilder
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	geomBuilder, ok := builder.Field(1).(*GeometryBuilder)
+	if !ok {
+		t.Fatalf("expected *GeometryBuilder, got %T", builder.Field(1))
+	}
+
+	// Add test data
+	testData := []struct {
+		id    int64
+		point orb.Point
+	}{
+		{1, orb.Point{-122.4194, 37.7749}}, // San Francisco
+		{2, orb.Point{-73.9857, 40.7484}},  // New York
+		{3, orb.Point{-0.1276, 51.5074}},   // London
+	}
+
+	for _, td := range testData {
+		idBuilder.Append(td.id)
+		if err := geomBuilder.Append(td.point); err != nil {
+			t.Fatalf("Append() failed: %v", err)
+		}
+	}
+
+	// Build record
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	// Verify record
+	if record.NumRows() != 3 {
+		t.Errorf("expected 3 rows, got %d", record.NumRows())
+	}
+
+	// Verify geometry column is GeometryArray
+	geomCol, ok := record.Column(1).(*GeometryArray)
+	if !ok {
+		t.Fatalf("expected *GeometryArray, got %T", record.Column(1))
+	}
+
+	// Verify all geometries
+	for i, td := range testData {
+		geom, err := geomCol.Value(i)
+		if err != nil {
+			t.Fatalf("Value(%d) failed: %v", i, err)
+		}
+		pt, ok := geom.(orb.Point)
+		if !ok {
+			t.Fatalf("row %d: expected orb.Point, got %T", i, geom)
+		}
+		if !pt.Equal(td.point) {
+			t.Errorf("row %d: expected %v, got %v", i, td.point, pt)
+		}
+	}
+}
+
+func TestGeometryBuilder_WithNullsInRecord(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	schema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		NewGeometryField("location", true, 4326, "Point"),
+	}, nil)
+
+	builder := array.NewRecordBuilder(mem, schema)
+	defer builder.Release()
+
+	idBuilder := builder.Field(0).(*array.Int64Builder)
+	geomBuilder := builder.Field(1).(*GeometryBuilder)
+
+	// Add data with nulls
+	idBuilder.Append(1)
+	if err := geomBuilder.Append(orb.Point{1, 2}); err != nil {
+		t.Fatalf("Append() failed: %v", err)
+	}
+
+	idBuilder.Append(2)
+	geomBuilder.AppendNull() // null geometry
+
+	idBuilder.Append(3)
+	if err := geomBuilder.Append(orb.Point{3, 4}); err != nil {
+		t.Fatalf("Append() failed: %v", err)
+	}
+
+	record := builder.NewRecordBatch()
+	defer record.Release()
+
+	geomCol := record.Column(1).(*GeometryArray)
+
+	// Verify null handling
+	if geomCol.IsNull(0) {
+		t.Error("row 0 should not be null")
+	}
+	if !geomCol.IsNull(1) {
+		t.Error("row 1 should be null")
+	}
+	if geomCol.IsNull(2) {
+		t.Error("row 2 should not be null")
+	}
+}
+
+func TestGeometryArray_String(t *testing.T) {
+	mem := memory.NewGoAllocator()
+
+	builder := NewGeometryBuilder(mem)
+	defer builder.Release()
+
+	if err := builder.Append(orb.Point{1, 2}); err != nil {
+		t.Fatalf("Append() failed: %v", err)
+	}
+	if err := builder.Append(orb.Point{3, 4}); err != nil {
+		t.Fatalf("Append() failed: %v", err)
+	}
+
+	arr := builder.NewGeometryArray()
+	defer arr.Release()
+
+	str := arr.String()
+	expected := "GeometryArray{len=2}"
+	if str != expected {
+		t.Errorf("expected %q, got %q", expected, str)
+	}
+}
