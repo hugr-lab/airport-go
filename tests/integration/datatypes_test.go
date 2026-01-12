@@ -5,7 +5,6 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/paulmach/orb"
-	"github.com/paulmach/orb/encoding/wkb"
 
 	"github.com/hugr-lab/airport-go"
 	"github.com/hugr-lab/airport-go/catalog"
@@ -59,11 +58,11 @@ func TestGeometryTypes(t *testing.T) {
 	defer db.Close()
 
 	// Install and load spatial extension for ST_AsText function
-	if _, err := db.Exec("INSTALL spatial"); err != nil {
+	if _, err := db.Exec("INSTALL spatial;LOAD spatial;"); err != nil {
 		t.Skipf("Spatial extension not available: %v", err)
 	}
-	if _, err := db.Exec("LOAD spatial"); err != nil {
-		t.Skipf("Failed to load spatial extension: %v", err)
+	if _, err := db.Exec("FROM register_geoarrow_extensions();"); err != nil {
+		t.Skipf("Failed to register geoarrow extensions: %v", err)
 	}
 
 	attachName := connectToFlightServer(t, db, server.address, "")
@@ -84,7 +83,7 @@ func TestGeometryTypes(t *testing.T) {
 		defer rows.Close()
 
 		expectedTypes := map[string]string{
-			"geom":    "BLOB", // WKB geometry stored as BLOB/BINARY
+			"geom":    "GEOMETRY", // WKB geometry stored as GEOMETRY
 			"geom_id": "BIGINT",
 		}
 
@@ -114,7 +113,7 @@ func TestGeometryTypes(t *testing.T) {
 
 	// Test 2: Query geometry data
 	t.Run("GeometryWKB", func(t *testing.T) {
-		query := "SELECT geom_id, ST_AsText(ST_GeomFromWKB(geom)) as geom_text FROM " + attachName + ".some_schema.geometries"
+		query := "SELECT geom_id, ST_AsText(geom) as geom_text FROM " + attachName + ".some_schema.geometries"
 		rows, err := db.Query(query)
 		if err != nil {
 			t.Fatalf("Failed to query geometries: %v", err)
@@ -314,27 +313,16 @@ func geometryTestCatalog() catalog.Catalog {
 	// Use BINARY type for WKB data - DuckDB will interpret with geoarrow.wkb extension
 	geomSchema := arrow.NewSchema([]arrow.Field{
 		{Name: "geom_id", Type: arrow.PrimitiveTypes.Int64},
-		{Name: "geom", Type: arrow.BinaryTypes.Binary, Metadata: arrow.MetadataFrom(map[string]string{
-			"ARROW:extension:name":     "geoarrow.wkb",
-			"ARROW:extension:metadata": "{}",
-		})},
+		{Name: "geom", Type: catalog.NewGeometryExtensionType()},
 	}, nil)
 
 	// Create geometries using orb and encode to WKB
 	point := orb.Point{1.0, 2.0}
-	pointWKB, err := wkb.Marshal(point)
-	if err != nil {
-		panic(err)
-	}
 
 	linestring := orb.LineString{
 		{0.0, 0.0},
 		{1.0, 1.0},
 		{2.0, 2.0},
-	}
-	linestringWKB, err := wkb.Marshal(linestring)
-	if err != nil {
-		panic(err)
 	}
 
 	// Create a simple triangle polygon
@@ -346,15 +334,11 @@ func geometryTestCatalog() catalog.Catalog {
 			{0.0, 0.0}, // Close the ring
 		},
 	}
-	polygonWKB, err := wkb.Marshal(polygon)
-	if err != nil {
-		panic(err)
-	}
 
 	geomData := [][]any{
-		{int64(1), pointWKB},
-		{int64(2), linestringWKB},
-		{int64(3), polygonWKB},
+		{int64(1), point},
+		{int64(2), linestring},
+		{int64(3), polygon},
 	}
 
 	cat, err := airport.NewCatalogBuilder().

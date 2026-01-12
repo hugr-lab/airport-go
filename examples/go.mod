@@ -6,6 +6,7 @@ require (
 	github.com/apache/arrow-go/v18 v18.4.1
 	github.com/google/uuid v1.6.0
 	github.com/hugr-lab/airport-go v0.1.1
+	github.com/paulmach/orb v0.12.0
 	google.golang.org/grpc v1.75.0
 )
 
@@ -14,7 +15,6 @@ require (
 	github.com/google/flatbuffers v25.9.23+incompatible // indirect
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
-	github.com/paulmach/orb v0.12.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

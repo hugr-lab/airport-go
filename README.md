@@ -12,6 +12,7 @@ A high-level Go package for building Apache Arrow Flight servers compatible with
 - **Dynamic Catalogs**: Implement custom catalog logic for live schema reflection
 - **Multi-Catalog Server**: Serve multiple catalogs from a single endpoint with dynamic add/remove
 - **Bearer Token Auth**: Built-in authentication with per-catalog authorization support
+- **Geometry Support**: GeoArrow WKB extension type compatible with DuckDB spatial
 - **Streaming Efficiency**: No rebatching - preserves Arrow batch sizes from your data sources
 - **Context Cancellation**: Respects client disconnections and timeouts
 - **gRPC Integration**: Registers on your existing `grpc.Server` - you control lifecycle and TLS
@@ -348,6 +349,74 @@ func (a *MultiCatalogAuth) AuthorizeCatalog(ctx context.Context, catalogName str
 
 See [examples/multicatalog](examples/multicatalog/) for a complete implementation.
 
+## Geometry (GeoArrow) Support
+
+Airport Go supports geometry columns using the GeoArrow WKB extension type, compatible with DuckDB's spatial extension.
+
+### Server-Side: Creating Geometry Columns
+
+Use `catalog.NewGeometryField()` to create geometry columns and `catalog.GeometryBuilder` to append geometry data:
+
+```go
+import (
+    "github.com/hugr-lab/airport-go/catalog"
+    "github.com/paulmach/orb"
+)
+
+// Create schema with geometry field (EPSG:4326 / WGS84)
+schema := arrow.NewSchema([]arrow.Field{
+    {Name: "id", Type: arrow.PrimitiveTypes.Int64},
+    {Name: "name", Type: arrow.BinaryTypes.String},
+    catalog.NewGeometryField("geom", true, 4326, "Point"), // srid=4326, geomType="Point"
+}, nil)
+
+// Build records using RecordBuilder
+builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+defer builder.Release()
+
+idBuilder := builder.Field(0).(*array.Int64Builder)
+nameBuilder := builder.Field(1).(*array.StringBuilder)
+// GeometryBuilder is automatically used for geometry columns
+geomBuilder := builder.Field(2).(*catalog.GeometryBuilder)
+
+// Append data
+idBuilder.Append(1)
+nameBuilder.Append("San Francisco")
+geomBuilder.Append(orb.Point{-122.4194, 37.7749})  // lon, lat
+
+record := builder.NewRecordBatch()
+```
+
+### Client-Side: DuckDB Setup
+
+**Important:** To query geometry data from DuckDB, you must install the spatial extension and register GeoArrow extensions:
+
+```sql
+-- Install and load Airport extension
+INSTALL airport FROM community;
+LOAD airport;
+
+-- REQUIRED for geometry support
+INSTALL spatial;
+LOAD spatial;
+FROM register_geoarrow_extensions();
+
+-- Connect to your Flight server
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
+
+-- Query geometry data
+SELECT * FROM demo.geo.locations;
+
+-- Spatial queries (uses DuckDB spatial functions)
+SELECT name, ST_AsText(geom) as wkt FROM demo.geo.locations;
+SELECT name FROM demo.geo.locations WHERE ST_X(geom) < 0;
+SELECT a.name, b.name, ST_Distance(a.geom, b.geom) as distance
+FROM demo.geo.locations a, demo.geo.locations b
+WHERE a.id < b.id;
+```
+
+See [examples/geometry](examples/geometry/) for a complete implementation.
+
 ## Architecture
 
 The package follows an interface-based design:
@@ -584,6 +653,7 @@ airport-go/
 │   ├── dynamic/        # Dynamic catalog example
 │   ├── filter/         # Filter pushdown example
 │   ├── functions/      # Scalar and table functions example
+│   ├── geometry/       # Geometry (GeoArrow) support example
 │   ├── multicatalog/   # Multi-catalog server with dynamic add/remove
 │   └── timetravel/     # Time travel queries example
 └── tests/               # Tests (separate module, with DuckDB)

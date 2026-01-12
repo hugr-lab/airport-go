@@ -735,6 +735,13 @@ func extractScalarValue(arr arrow.Array, idx int) any {
 			result[key] = value
 		}
 		return result
+	case *catalog.GeometryArray:
+		// Return orb.Geometry
+		geom, err := a.Value(idx)
+		if err != nil {
+			return nil
+		}
+		return geom
 	default:
 		// For unsupported types, return the array itself
 		return nil

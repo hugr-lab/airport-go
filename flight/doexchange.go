@@ -265,8 +265,9 @@ func (s *Server) handleScalarFunction(ctx context.Context, stream flight.FlightS
 
 			// Validate output has same number of rows as input
 			if res.Len() != int(inLen) {
+				len := res.Len()
 				res.Release()
-				return fmt.Errorf("output rows must match input rows, expected %d got %d", inLen, res.Len())
+				return fmt.Errorf("output rows must match input rows, expected %d got %d", inLen, len)
 			}
 
 			// Validate output array type matches function signature return type
