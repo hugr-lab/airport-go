@@ -17,6 +17,7 @@ import (
 //   - Ticket: Opaque byte slice encoding schema/table names
 //   - Endpoints: Single endpoint with the ticket
 func (s *Server) GetFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	ctx = EnrichContextMetadata(ctx)
 	s.logger.Debug("GetFlightInfo called",
 		"type", desc.GetType(),
 		"path_length", len(desc.GetPath()),

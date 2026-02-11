@@ -7,7 +7,7 @@ This document provides a comprehensive reference for the airport-go public API.
 ```text
 github.com/hugr-lab/airport-go
 ├── airport.go          # Main package: Server, CatalogBuilder
-├── catalog/            # Catalog interfaces
+├── catalog/            # Catalog interfaces, geometry support
 ├── auth/               # Authentication implementations
 ├── filter/             # Filter pushdown parsing and encoding
 └── flight/             # Flight handler (internal)
@@ -1012,6 +1012,94 @@ lis, _ := net.Listen("tcp", ":50051")
 grpcServer.Serve(lis)
 ```
 
+### MultiCatalogServerConfig
+
+For servers that need to serve multiple catalogs, use `MultiCatalogServerConfig`:
+
+```go
+type MultiCatalogServerConfig struct {
+    // Catalogs is the list of initial catalogs to serve. Optional (can be empty).
+    // Each catalog should implement catalog.NamedCatalog for routing.
+    // Catalog names must be unique (including empty string for default).
+    // Additional catalogs can be added at runtime via AddCatalog().
+    Catalogs []catalog.Catalog
+
+    // Allocator for Arrow memory management. Optional, defaults to DefaultAllocator.
+    Allocator memory.Allocator
+
+    // Logger for server events. Optional, defaults to slog with Info level.
+    Logger *slog.Logger
+
+    // LogLevel sets the minimum log level. Optional, defaults to Info.
+    // Only used if Logger is nil.
+    LogLevel *slog.Level
+
+    // Address is the server's public address for FlightEndpoint locations.
+    // Optional, defaults to reuse connection.
+    Address string
+
+    // TransactionManager coordinates transactions across catalogs. Optional.
+    // Must implement CatalogTransactionManager for multi-catalog support.
+    TransactionManager catalog.CatalogTransactionManager
+
+    // Auth is the authenticator for validating requests. Optional.
+    // If the authenticator also implements CatalogAuthorizer, AuthorizeCatalog
+    // is called after Authenticate to perform per-catalog authorization.
+    Auth auth.Authenticator
+
+    // MaxMessageSize is the maximum gRPC message size. Optional.
+    MaxMessageSize int
+}
+```
+
+### Creating a Multi-Catalog Server
+
+```go
+// Define catalogs (must implement catalog.NamedCatalog)
+salesCatalog := NewSalesCatalog()      // Name() returns "sales"
+analyticsCatalog := NewAnalyticsCatalog() // Name() returns "analytics"
+
+// Create server configuration
+config := airport.MultiCatalogServerConfig{
+    Catalogs: []catalog.Catalog{salesCatalog, analyticsCatalog},
+    Auth:     myCatalogAwareAuth, // Optional: implements CatalogAuthorizer
+}
+
+// Create gRPC server with options
+opts := airport.MultiCatalogServerOptions(config)
+grpcServer := grpc.NewServer(opts...)
+
+// Register multi-catalog Airport service
+// Returns *MultiCatalogServer which can be used to add/remove catalogs at runtime
+mcs, err := airport.NewMultiCatalogServer(grpcServer, config)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Dynamic catalog management (can be called while server is running):
+//
+// Add a new catalog at runtime:
+//   newCatalog := NewInventoryCatalog() // Must implement catalog.NamedCatalog
+//   if err := mcs.AddCatalog(newCatalog); err != nil {
+//       log.Printf("Failed to add catalog: %v", err)
+//   }
+//
+// Remove a catalog by name:
+//   if err := mcs.RemoveCatalog("inventory"); err != nil {
+//       log.Printf("Failed to remove catalog: %v", err)
+//   }
+//
+// Note: In-flight requests to a removed catalog complete normally.
+// New requests to the removed catalog receive NotFound error.
+
+// Start serving
+lis, _ := net.Listen("tcp", ":50051")
+grpcServer.Serve(lis)
+```
+
+Clients specify the target catalog via the `airport-catalog` gRPC metadata header.
+If no header is provided, the request is routed to the default catalog (empty name).
+
 ## Authentication
 
 ### Authenticator Interface
@@ -1021,6 +1109,60 @@ type Authenticator interface {
     // Authenticate validates credentials and returns an identity.
     // Returns ErrUnauthorized if credentials are invalid.
     Authenticate(ctx context.Context, token string) (string, error)
+}
+```
+
+### CatalogAuthorizer Interface
+
+For multi-catalog servers, authenticators can implement `CatalogAuthorizer` to provide
+per-catalog authorization:
+
+```go
+type CatalogAuthorizer interface {
+    // AuthorizeCatalog authorizes access to a specific catalog.
+    // Called after successful Authenticate() to check catalog-level permissions.
+    // Parameters:
+    //   - ctx: Request context with identity already set from Authenticate()
+    //   - catalog: Target catalog name (empty string for default)
+    // Returns:
+    //   - ctx: Potentially enriched context (e.g., with catalog-specific claims)
+    //   - err: Non-nil if authorization fails (returns gRPC PermissionDenied status)
+    AuthorizeCatalog(ctx context.Context, catalog string) (context.Context, error)
+}
+```
+
+**Example Implementation:**
+
+```go
+type MultiCatalogAuth struct {
+    // userCatalogs maps user identity to allowed catalog names
+    userCatalogs map[string][]string
+}
+
+func (a *MultiCatalogAuth) Authenticate(ctx context.Context, token string) (string, error) {
+    // Validate token and return identity
+    identity, ok := a.validateToken(token)
+    if !ok {
+        return "", auth.ErrUnauthenticated
+    }
+    return identity, nil
+}
+
+func (a *MultiCatalogAuth) AuthorizeCatalog(ctx context.Context, catalogName string) (context.Context, error) {
+    identity := auth.IdentityFromContext(ctx)
+
+    allowedCatalogs, ok := a.userCatalogs[identity]
+    if !ok {
+        return ctx, errors.New("user has no catalog access")
+    }
+
+    for _, allowed := range allowedCatalogs {
+        if allowed == catalogName {
+            return ctx, nil // Access granted
+        }
+    }
+
+    return ctx, fmt.Errorf("user %s cannot access catalog %s", identity, catalogName)
 }
 ```
 
@@ -1044,7 +1186,7 @@ auth := nil
 ```go
 func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
     // Get authenticated identity from context
-    identity := airport.IdentityFromContext(ctx)
+    identity := auth.IdentityFromContext(ctx)
     if identity != "" {
         // User is authenticated
     }
@@ -1069,15 +1211,50 @@ projected := catalog.ProjectSchema(fullSchema, []string{"id", "name"})
 ### Context Helpers
 
 ```go
-// Get identity from context
-identity := airport.IdentityFromContext(ctx)
+// Get identity from context (auth package)
+identity := auth.IdentityFromContext(ctx)
 
-// Get transaction ID from context
+// Get transaction ID from context (catalog package)
 txID, ok := catalog.TransactionIDFromContext(ctx)
 
 // Add transaction ID to context
 ctx = catalog.WithTransactionID(ctx, txID)
 ```
+
+### Request Metadata (flight package)
+
+The `flight` package provides helpers for accessing gRPC metadata from request context:
+
+```go
+import "github.com/hugr-lab/airport-go/flight"
+
+// Get catalog name from request metadata (airport-catalog header)
+catalogName := flight.CatalogNameFromContext(ctx)
+
+// Get trace ID from request metadata (airport-trace-id header)
+traceID := flight.TraceIDFromContext(ctx)
+
+// Get session ID from request metadata (airport-client-session-id header)
+sessionID := flight.SessionIDFromContext(ctx)
+
+// Get authorization header value
+authHeader := flight.AuthorizationFromContext(ctx)
+
+// Get all metadata at once
+meta := flight.MetaFromContext(ctx)
+if meta != nil {
+    fmt.Printf("Catalog: %s, TraceID: %s\n", meta.CatalogName, meta.TraceID)
+}
+```
+
+**Metadata Headers:**
+
+| Header | Description | Context Helper |
+|--------|-------------|----------------|
+| `authorization` | Bearer token for authentication | `AuthorizationFromContext()` |
+| `airport-catalog` | Target catalog name for routing | `CatalogNameFromContext()` |
+| `airport-trace-id` | Distributed trace identifier | `TraceIDFromContext()` |
+| `airport-client-session-id` | Client session identifier | `SessionIDFromContext()` |
 
 ### Error Types
 
@@ -1206,3 +1383,255 @@ case *filter.CaseExpression:
 ```
 
 See `examples/filter/main.go` for complete examples.
+
+## Geometry (GeoArrow) Support
+
+The `catalog` package provides GeoArrow WKB extension type support for geometry columns, compatible with DuckDB's spatial extension.
+
+### GeometryExtensionType
+
+Arrow extension type for geometry data stored as WKB (Well-Known Binary):
+
+```go
+// Create a geometry extension type
+extType := catalog.NewGeometryExtensionType()
+
+// Extension name is "geoarrow.wkb" for DuckDB/GeoArrow compatibility
+extType.ExtensionName() // "geoarrow.wkb"
+
+// Storage type is Binary
+extType.StorageType() // arrow.BinaryTypes.Binary
+```
+
+### Creating Geometry Fields
+
+Use `NewGeometryField` to create Arrow fields with proper extension type and CRS metadata:
+
+```go
+// Create a geometry field with EPSG:4326 (WGS84) coordinate system
+field := catalog.NewGeometryField(
+    "location",  // field name
+    true,        // nullable
+    4326,        // SRID (EPSG code)
+    "Point",     // geometry type constraint
+)
+
+// Use in schema
+schema := arrow.NewSchema([]arrow.Field{
+    {Name: "id", Type: arrow.PrimitiveTypes.Int64},
+    {Name: "name", Type: arrow.BinaryTypes.String},
+    catalog.NewGeometryField("geom", true, 4326, "Point"),
+}, nil)
+```
+
+**Supported Geometry Types:**
+
+| Type | Description |
+|------|-------------|
+| `"Point"` | Single coordinate |
+| `"LineString"` | Sequence of coordinates |
+| `"Polygon"` | Closed ring(s) |
+| `"MultiPoint"` | Collection of points |
+| `"MultiLineString"` | Collection of linestrings |
+| `"MultiPolygon"` | Collection of polygons |
+| `"GeometryCollection"` | Mixed geometry collection |
+| `"GEOMETRY"` or `""` | Any geometry type |
+
+### GeometryBuilder
+
+Custom builder for appending geometry data. Automatically used when `RecordBuilder` encounters a geometry field:
+
+```go
+import (
+    "github.com/hugr-lab/airport-go/catalog"
+    "github.com/paulmach/orb"
+)
+
+// Method 1: Direct usage
+builder := catalog.NewGeometryBuilder(memory.DefaultAllocator)
+defer builder.Release()
+
+// Append geometry (encodes to WKB automatically)
+builder.Append(orb.Point{-122.4194, 37.7749})
+builder.Append(orb.LineString{{0, 0}, {1, 1}, {2, 2}})
+builder.AppendNull()
+
+// Append raw WKB bytes
+builder.AppendWKB(wkbBytes)
+
+// Batch append with validity mask
+geoms := []orb.Geometry{orb.Point{1, 2}, orb.Point{3, 4}}
+valid := []bool{true, false}
+builder.AppendValues(geoms, valid)
+
+// Build array
+arr := builder.NewGeometryArray()
+defer arr.Release()
+
+// Method 2: Via RecordBuilder (automatic)
+schema := arrow.NewSchema([]arrow.Field{
+    {Name: "id", Type: arrow.PrimitiveTypes.Int64},
+    catalog.NewGeometryField("geom", true, 4326, "Point"),
+}, nil)
+
+recBuilder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+defer recBuilder.Release()
+
+idBuilder := recBuilder.Field(0).(*array.Int64Builder)
+// GeometryBuilder is automatically used for geometry columns
+geomBuilder := recBuilder.Field(1).(*catalog.GeometryBuilder)
+
+idBuilder.Append(1)
+geomBuilder.Append(orb.Point{-122.4194, 37.7749})
+
+record := recBuilder.NewRecordBatch()
+```
+
+### GeometryArray
+
+Extension array for reading geometry data:
+
+```go
+// From RecordBatch column
+geomCol := record.Column(1).(*catalog.GeometryArray)
+
+// Get raw WKB bytes
+wkbBytes := geomCol.ValueBytes(0)
+
+// Get decoded geometry (returns orb.Geometry)
+geom, err := geomCol.Value(0)
+if err != nil {
+    // Handle decode error
+}
+
+// Type assertion to specific geometry type
+switch g := geom.(type) {
+case orb.Point:
+    fmt.Printf("Point: %f, %f\n", g.Lon(), g.Lat())
+case orb.LineString:
+    fmt.Printf("LineString with %d points\n", len(g))
+case orb.Polygon:
+    fmt.Printf("Polygon with %d rings\n", len(g))
+}
+
+// Check for null
+if geomCol.IsNull(i) {
+    // Value is null
+}
+```
+
+### Encoding/Decoding Utilities
+
+Low-level functions for WKB conversion:
+
+```go
+// Encode geometry to WKB
+point := orb.Point{-122.4194, 37.7749}
+wkbBytes, err := catalog.EncodeGeometry(point)
+
+// Decode WKB to geometry
+geom, err := catalog.DecodeGeometry(wkbBytes)
+
+// Validate geometry before encoding
+err := catalog.ValidateGeometry(polygon)
+if err != nil {
+    // e.g., "polygon outer ring is not closed"
+}
+
+// Get geometry type name
+typeName := catalog.GeometryTypeName(geom) // "Point", "Polygon", etc.
+```
+
+### DuckDB Client Setup
+
+**Important:** To query geometry data from DuckDB, the spatial extension must be installed and GeoArrow extensions registered:
+
+```sql
+-- Install and load Airport
+INSTALL airport FROM community;
+LOAD airport;
+
+-- REQUIRED for geometry support
+INSTALL spatial;
+LOAD spatial;
+FROM register_geoarrow_extensions();
+
+-- Connect to server
+ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
+
+-- Query geometry columns
+SELECT * FROM demo.geo.locations;
+
+-- Spatial functions work with geometry columns
+SELECT name, ST_AsText(geom) as wkt FROM demo.geo.locations;
+SELECT name FROM demo.geo.locations WHERE ST_X(geom) < 0;
+SELECT ST_Distance(a.geom, b.geom) FROM demo.geo.locations a, demo.geo.locations b;
+```
+
+The `register_geoarrow_extensions()` function registers a type handler that converts the `geoarrow.wkb` extension type to DuckDB's native GEOMETRY type.
+
+### Complete Example
+
+```go
+package main
+
+import (
+    "context"
+    "github.com/apache/arrow-go/v18/arrow"
+    "github.com/apache/arrow-go/v18/arrow/array"
+    "github.com/apache/arrow-go/v18/arrow/memory"
+    "github.com/paulmach/orb"
+    "github.com/hugr-lab/airport-go/catalog"
+)
+
+type LocationsTable struct {
+    schema *arrow.Schema
+    data   []Location
+}
+
+type Location struct {
+    ID    int64
+    Name  string
+    Point orb.Point
+}
+
+func NewLocationsTable() *LocationsTable {
+    return &LocationsTable{
+        schema: arrow.NewSchema([]arrow.Field{
+            {Name: "id", Type: arrow.PrimitiveTypes.Int64},
+            {Name: "name", Type: arrow.BinaryTypes.String},
+            catalog.NewGeometryField("geom", true, 4326, "Point"),
+        }, nil),
+        data: []Location{
+            {1, "San Francisco", orb.Point{-122.4194, 37.7749}},
+            {2, "New York", orb.Point{-73.9857, 40.7484}},
+        },
+    }
+}
+
+func (t *LocationsTable) Name() string { return "locations" }
+func (t *LocationsTable) Comment() string { return "Locations with geometry" }
+func (t *LocationsTable) ArrowSchema(columns []string) *arrow.Schema {
+    return catalog.ProjectSchema(t.schema, columns)
+}
+
+func (t *LocationsTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.RecordReader, error) {
+    builder := array.NewRecordBuilder(memory.DefaultAllocator, t.schema)
+    defer builder.Release()
+
+    idBuilder := builder.Field(0).(*array.Int64Builder)
+    nameBuilder := builder.Field(1).(*array.StringBuilder)
+    geomBuilder := builder.Field(2).(*catalog.GeometryBuilder)
+
+    for _, loc := range t.data {
+        idBuilder.Append(loc.ID)
+        nameBuilder.Append(loc.Name)
+        geomBuilder.Append(loc.Point) // Auto-encodes to WKB
+    }
+
+    record := builder.NewRecordBatch()
+    return array.NewRecordReader(t.schema, []arrow.RecordBatch{record})
+}
+```
+
+See `examples/geometry/` for a complete runnable example.

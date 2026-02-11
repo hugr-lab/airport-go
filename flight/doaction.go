@@ -23,7 +23,7 @@ import (
 //   - Table function schema discovery
 //   - Custom server commands
 func (s *Server) DoAction(action *flight.Action, stream flight.FlightService_DoActionServer) error {
-	ctx := stream.Context()
+	ctx := EnrichContextMetadata(stream.Context())
 
 	s.logger.Debug("DoAction called",
 		"type", action.GetType(),

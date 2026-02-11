@@ -18,7 +18,7 @@ import (
 //
 // Criteria parameter is currently ignored (returns all tables).
 func (s *Server) ListFlights(criteria *flight.Criteria, stream flight.FlightService_ListFlightsServer) error {
-	ctx := stream.Context()
+	ctx := EnrichContextMetadata(stream.Context())
 
 	s.logger.Debug("ListFlights called")
 

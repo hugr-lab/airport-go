@@ -2,8 +2,6 @@ package catalog
 
 import (
 	"context"
-
-	"github.com/hugr-lab/airport-go/internal/txcontext"
 )
 
 // TransactionState represents the lifecycle stage of a transaction.
@@ -54,8 +52,47 @@ type TransactionManager interface {
 	GetTransactionStatus(ctx context.Context, txID string) (TransactionState, bool)
 }
 
+// CatalogTransactionManager extends TransactionManager with catalog context.
+// Transactions are scoped to a specific catalog, enabling correct routing of
+// commit/rollback operations in multi-catalog deployments.
+//
+// Implementations MUST be goroutine-safe.
+type CatalogTransactionManager interface {
+	// BeginTransaction creates a new transaction in the specified catalog.
+	// The transaction ID should be globally unique (UUID recommended).
+	// The catalog name is stored with the transaction for routing.
+	BeginTransaction(ctx context.Context, catalogName string) (txID string, err error)
+
+	// CommitTransaction commits a transaction.
+	// The implementation must know which catalog the transaction belongs to.
+	CommitTransaction(ctx context.Context, txID string) error
+
+	// RollbackTransaction aborts a transaction.
+	// The implementation must know which catalog the transaction belongs to.
+	RollbackTransaction(ctx context.Context, txID string) error
+
+	// GetTransactionStatus returns the state and catalog of a transaction.
+	// Returns (state, catalogName, true) if transaction exists.
+	// Returns ("", "", false) if transaction does not exist.
+	GetTransactionStatus(ctx context.Context, txID string) (state TransactionState, catalogName string, exists bool)
+}
+
+// contextKey is a private type for context keys to avoid collisions.
+type contextKey int
+
+const transactionIDKey contextKey = iota
+
+// WithTransactionID returns a new context with the transaction ID set.
+func WithTransactionID(ctx context.Context, txID string) context.Context {
+	return context.WithValue(ctx, transactionIDKey, txID)
+}
+
 // TransactionIDFromContext retrieves the transaction ID if present.
 // Returns ("", false) if no transaction ID is set.
 func TransactionIDFromContext(ctx context.Context) (string, bool) {
-	return txcontext.TransactionIDFromContext(ctx)
+	txId, ok := ctx.Value(transactionIDKey).(string)
+	if !ok {
+		return "", false
+	}
+	return txId, true
 }
