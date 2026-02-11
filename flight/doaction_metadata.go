@@ -74,11 +74,8 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 		return status.Errorf(codes.NotFound, "table not found: %s.%s", schemaName, tableOrFunctionName)
 	}
 
-	// Determine the schema for this table (possibly at a specific time point)
-	var tableSchema *arrow.Schema
-	var timePoint *catalog.TimePoint
-
 	// Parse time travel parameters if present
+	var timePoint *catalog.TimePoint
 	if request.AtUnit != "" && request.AtValue != "" {
 		timePoint = &catalog.TimePoint{
 			Unit:  request.AtUnit,
@@ -90,6 +87,14 @@ func (s *Server) handleFlightInfo(ctx context.Context, action *flight.Action, st
 			"value", timePoint.Value,
 		)
 	}
+
+	// If table not found, check for table reference
+	if table == nil {
+		return s.handleFlightInfoForTableRef(ctx, schema, schemaName, tableOrFunctionName, timePoint, desc, stream)
+	}
+
+	// Determine the schema for this table (possibly at a specific time point)
+	var tableSchema *arrow.Schema
 
 	// Check if table supports dynamic schema (time travel)
 	if timePoint != nil {
@@ -229,12 +234,31 @@ func (s *Server) handleEndpoints(ctx context.Context, action *flight.Action, str
 	schemaName := desc.GetPath()[0]
 	tableOrFunctionName := desc.GetPath()[1]
 
-	var ticket []byte
 	if request.Parameters.TableFunctionParameters != "" {
-		ticket, err = s.createTableFunctionTicket(ctx, schemaName, tableOrFunctionName, request)
-	} else {
-		ticket, err = s.createTableTicket(ctx, schemaName, tableOrFunctionName, request)
+		ticket, err := s.createTableFunctionTicket(ctx, schemaName, tableOrFunctionName, request)
+		if err != nil {
+			return err
+		}
+		return s.sendEndpointResponse(schemaName, tableOrFunctionName, ticket, stream)
 	}
+
+	// Check if this is a table reference
+	schemaObj, err := s.catalog.Schema(ctx, schemaName)
+	if err != nil {
+		return status.Errorf(codes.NotFound, "schema not found: %s", schemaName)
+	}
+	if schemaWithRefs, ok := schemaObj.(catalog.SchemaWithTableRefs); ok {
+		ref, err := schemaWithRefs.TableRef(ctx, tableOrFunctionName)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to look up table ref: %v", err)
+		}
+		if ref != nil {
+			return s.handleTableRefEndpoints(ctx, ref, schemaName, tableOrFunctionName, request, stream)
+		}
+	}
+
+	// Regular table path
+	ticket, err := s.createTableTicket(ctx, schemaName, tableOrFunctionName, request)
 	if err != nil {
 		return err
 	}
@@ -524,6 +548,145 @@ func (s *Server) sendEndpointResponse(schemaName, tableName string, ticket []byt
 		"endpoint_count", 1,
 	)
 	return nil
+}
+
+// handleFlightInfoForTableRef handles flight_info action for table references.
+// It returns FlightInfo with the table ref's schema and type "table" metadata.
+func (s *Server) handleFlightInfoForTableRef(
+	ctx context.Context,
+	schema catalog.Schema,
+	schemaName, tableName string,
+	timePoint *catalog.TimePoint,
+	desc *flight.FlightDescriptor,
+	stream flight.FlightService_DoActionServer,
+) error {
+	schemaWithRefs, ok := schema.(catalog.SchemaWithTableRefs)
+	if !ok {
+		return status.Errorf(codes.NotFound, "table not found: %s.%s", schemaName, tableName)
+	}
+
+	ref, err := schemaWithRefs.TableRef(ctx, tableName)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to look up table ref: %v", err)
+	}
+	if ref == nil {
+		return status.Errorf(codes.NotFound, "table not found: %s.%s", schemaName, tableName)
+	}
+
+	// Determine schema - check for DynamicSchemaTableRef if time point present
+	var tableSchema *arrow.Schema
+	if timePoint != nil {
+		if dynamicRef, ok := ref.(catalog.DynamicSchemaTableRef); ok {
+			tableSchema, err = dynamicRef.SchemaForRequest(ctx, &catalog.SchemaRequest{
+				TimePoint: timePoint,
+			})
+			if err != nil {
+				return status.Errorf(codes.Internal, "failed to get schema for time point: %v", err)
+			}
+		}
+	}
+	if tableSchema == nil {
+		tableSchema = ref.ArrowSchema()
+	}
+	if tableSchema == nil {
+		return status.Errorf(codes.Internal, "table ref %s.%s has nil Arrow schema", schemaName, tableName)
+	}
+
+	appMetadata, _ := msgpack.Encode(map[string]any{
+		"type":         "table",
+		"schema":       schema.Name(),
+		"catalog":      s.CatalogName(),
+		"name":         ref.Name(),
+		"comment":      ref.Comment(),
+		"input_schema": nil,
+		"action_name":  nil,
+		"description":  nil,
+		"extra_data":   nil,
+	})
+
+	flightInfo := &flight.FlightInfo{
+		Schema:           flight.SerializeSchema(tableSchema, s.allocator),
+		FlightDescriptor: desc,
+		Endpoint: []*flight.FlightEndpoint{
+			{
+				Ticket: &flight.Ticket{
+					Ticket: []byte("{}"),
+				},
+			},
+		},
+		TotalRecords: -1,
+		TotalBytes:   -1,
+		Ordered:      false,
+		AppMetadata:  appMetadata,
+	}
+
+	infoBytes, err := proto.Marshal(flightInfo)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to marshal FlightInfo: %v", err)
+	}
+
+	s.logger.Debug("handleFlightInfo completed (table ref)",
+		"schema", schemaName,
+		"table", tableName,
+		"has_time_travel", timePoint != nil,
+	)
+
+	return stream.Send(&flight.Result{Body: infoBytes})
+}
+
+// handleTableRefEndpoints builds a FunctionCallRequest from the endpoints action
+// parameters and delegates to the TableRef to generate function calls.
+func (s *Server) handleTableRefEndpoints(
+	ctx context.Context,
+	ref catalog.TableRef,
+	schemaName, tableName string,
+	request *endpointsRequest,
+	stream flight.FlightService_DoActionServer,
+) error {
+	fcReq := &catalog.FunctionCallRequest{
+		Filters: request.Parameters.JsonFilters,
+	}
+
+	// Resolve column names from column IDs
+	if len(request.Parameters.ColumnIDs) > 0 {
+		refSchema := ref.ArrowSchema()
+		if refSchema != nil {
+			fcReq.Columns = mapColumnIDsToNames(refSchema, request.Parameters.ColumnIDs)
+		}
+	}
+
+	// Decode function parameters if present
+	if request.Parameters.TableFunctionParameters != "" {
+		params, err := s.extractFunctionParams([]byte(request.Parameters.TableFunctionParameters))
+		if err != nil {
+			return err
+		}
+		fcReq.Parameters = params
+	}
+
+	// Set time point if present
+	if request.Parameters.AtUnit != "" && request.Parameters.AtValue != "" {
+		fcReq.TimePoint = &catalog.TimePoint{
+			Unit:  normalizeTimeUnit(request.Parameters.AtUnit),
+			Value: request.Parameters.AtValue,
+		}
+	}
+
+	functionCalls, err := ref.FunctionCalls(ctx, fcReq)
+	if err != nil {
+		s.logger.Error("TableRef.FunctionCalls failed",
+			"schema", schemaName,
+			"table", tableName,
+			"error", err,
+		)
+		return status.Errorf(codes.Internal, "failed to get function calls: %v", err)
+	}
+
+	if len(functionCalls) == 0 {
+		return status.Errorf(codes.Internal, "table ref %s.%s returned no function calls", schemaName, tableName)
+	}
+
+	return s.sendTableRefEndpointResponse(schemaName, tableName, functionCalls, stream)
 }
 
 // handleCreateTransaction returns a transaction identifier.
