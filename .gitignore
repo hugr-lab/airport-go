@@ -51,5 +51,8 @@ vendor/
 *.tmp
 *.temp
 
+# Spec plans
+specs/
+
 # OS-specific
 Thumbs.db

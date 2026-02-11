@@ -15,6 +15,7 @@ A high-level Go package for building Apache Arrow Flight servers compatible with
 - **Geometry Support**: GeoArrow WKB extension type compatible with DuckDB spatial
 - **Streaming Efficiency**: No rebatching - preserves Arrow batch sizes from your data sources
 - **Context Cancellation**: Respects client disconnections and timeouts
+- **Table References**: Delegate reads to DuckDB functions (read_csv, read_parquet, etc.) via data:// URIs
 - **gRPC Integration**: Registers on your existing `grpc.Server` - you control lifecycle and TLS
 
 ## Installation
@@ -276,6 +277,42 @@ Supported expressions:
 
 See [examples/filter](examples/filter/) for complete examples and [Airport Extension docs](https://airport.query.farm/server_predicate_pushdown.html) for filter format specification.
 
+## Table References
+
+Point DuckDB at external data sources without proxying data through the Flight server:
+
+```go
+type csvRef struct {
+    url string
+}
+
+func (r *csvRef) Name() string              { return "orders" }
+func (r *csvRef) Comment() string            { return "CSV data" }
+func (r *csvRef) ArrowSchema() *arrow.Schema { return orderSchema }
+
+func (r *csvRef) FunctionCalls(ctx context.Context, req *catalog.FunctionCallRequest) ([]catalog.FunctionCall, error) {
+    return []catalog.FunctionCall{
+        {
+            FunctionName: "read_csv",
+            Args: []catalog.FunctionCallArg{
+                {Value: r.url, Type: arrow.BinaryTypes.String},
+                {Name: "header", Value: true, Type: arrow.FixedWidthTypes.Boolean},
+            },
+        },
+    }, nil
+}
+
+// Register in catalog
+cat, _ := airport.NewCatalogBuilder().
+    Schema("data").
+    TableRef(&csvRef{url: "https://example.com/orders.csv"}).
+    Build()
+```
+
+Table references appear as normal tables in DuckDB (`SHOW TABLES`, `DESCRIBE`, `SELECT`) but DuckDB reads the data directly using the specified function call.
+
+See [examples/tableref](examples/tableref/) for a complete example and [API Guide](docs/api-guide.md) for interface documentation.
+
 ## Named Catalogs
 
 Implement `NamedCatalog` to give your catalog a name for DuckDB ATTACH statements:
@@ -425,6 +462,7 @@ The package follows an interface-based design:
 - **NamedCatalog**: Extends Catalog with a name for DuckDB ATTACH
 - **Schema**: Interface for querying tables and functions
 - **Table**: Interface providing Arrow schema and scan function
+- **TableRef**: Read-only tables that delegate to DuckDB functions via data:// URIs
 - **ScalarFunction/TableFunction**: Interfaces for custom functions
 - **DynamicCatalog**: Extends Catalog with CREATE/DROP SCHEMA
 - **DynamicSchema**: Extends Schema with CREATE/DROP/RENAME TABLE
@@ -655,6 +693,7 @@ airport-go/
 │   ├── functions/      # Scalar and table functions example
 │   ├── geometry/       # Geometry (GeoArrow) support example
 │   ├── multicatalog/   # Multi-catalog server with dynamic add/remove
+│   ├── tableref/       # Table reference (data:// URI) example
 │   └── timetravel/     # Time travel queries example
 └── tests/               # Tests (separate module, with DuckDB)
     ├── go.mod          # Tests module

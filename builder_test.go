@@ -400,6 +400,359 @@ func (m *mockTableFunc) Execute(ctx context.Context, params []any, opts *catalog
 	return testScanFunc(schema)(ctx, opts)
 }
 
+// mockTableRef implements catalog.TableRef for testing.
+type mockTableRef struct {
+	name    string
+	comment string
+	schema  *arrow.Schema
+}
+
+func (m *mockTableRef) Name() string              { return m.name }
+func (m *mockTableRef) Comment() string            { return m.comment }
+func (m *mockTableRef) ArrowSchema() *arrow.Schema { return m.schema }
+
+func (m *mockTableRef) FunctionCalls(ctx context.Context, req *catalog.FunctionCallRequest) ([]catalog.FunctionCall, error) {
+	return []catalog.FunctionCall{
+		{
+			FunctionName: "read_csv",
+			Args: []catalog.FunctionCallArg{
+				{Value: "/data/test.csv", Type: arrow.BinaryTypes.String},
+			},
+		},
+	}, nil
+}
+
+// TestCatalogBuilderWithTableRef tests adding a table reference.
+func TestCatalogBuilderWithTableRef(t *testing.T) {
+	refSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "name", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	ref := &mockTableRef{
+		name:    "csv_data",
+		comment: "CSV data reference",
+		schema:  refSchema,
+	}
+
+	cat, err := NewCatalogBuilder().
+		Schema("test").
+		TableRef(ref).
+		Build()
+
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	ctx := context.Background()
+	schema, err := cat.Schema(ctx, "test")
+	if err != nil {
+		t.Fatalf("Schema() failed: %v", err)
+	}
+
+	// Check SchemaWithTableRefs interface
+	schemaWithRefs, ok := schema.(catalog.SchemaWithTableRefs)
+	if !ok {
+		t.Fatal("Expected schema to implement SchemaWithTableRefs")
+	}
+
+	refs, err := schemaWithRefs.TableRefs(ctx)
+	if err != nil {
+		t.Fatalf("TableRefs() failed: %v", err)
+	}
+
+	if len(refs) != 1 {
+		t.Errorf("Expected 1 table ref, got %d", len(refs))
+	}
+
+	// Lookup by name
+	found, err := schemaWithRefs.TableRef(ctx, "csv_data")
+	if err != nil {
+		t.Fatalf("TableRef() failed: %v", err)
+	}
+
+	if found == nil {
+		t.Fatal("Expected non-nil table ref")
+	}
+
+	if found.Name() != "csv_data" {
+		t.Errorf("Expected name 'csv_data', got '%s'", found.Name())
+	}
+
+	// Not found case
+	notFound, err := schemaWithRefs.TableRef(ctx, "nonexistent")
+	if err != nil {
+		t.Fatalf("TableRef() failed for nonexistent: %v", err)
+	}
+	if notFound != nil {
+		t.Error("Expected nil for nonexistent table ref")
+	}
+}
+
+// TestCatalogBuilderTableRefDuplicateName tests that duplicate table ref names are rejected.
+func TestCatalogBuilderTableRefDuplicateName(t *testing.T) {
+	refSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	ref1 := &mockTableRef{name: "dup", schema: refSchema}
+	ref2 := &mockTableRef{name: "dup", schema: refSchema}
+
+	_, err := NewCatalogBuilder().
+		Schema("test").
+		TableRef(ref1).
+		TableRef(ref2).
+		Build()
+
+	if err == nil {
+		t.Error("Expected error for duplicate table ref names, got nil")
+	}
+}
+
+// TestCatalogBuilderTableRefEmptyName tests that empty table ref names are rejected.
+func TestCatalogBuilderTableRefEmptyName(t *testing.T) {
+	refSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	ref := &mockTableRef{name: "", schema: refSchema}
+
+	_, err := NewCatalogBuilder().
+		Schema("test").
+		TableRef(ref).
+		Build()
+
+	if err == nil {
+		t.Error("Expected error for empty table ref name, got nil")
+	}
+}
+
+// TestCatalogBuilderTableRefWithTable tests that table refs and regular tables coexist.
+func TestCatalogBuilderTableRefWithTable(t *testing.T) {
+	tableSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	refSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.BinaryTypes.String},
+	}, nil)
+
+	ref := &mockTableRef{name: "csv_ref", schema: refSchema}
+
+	cat, err := NewCatalogBuilder().
+		Schema("test").
+		SimpleTable(SimpleTableDef{
+			Name:     "regular_table",
+			Schema:   tableSchema,
+			ScanFunc: testScanFunc(tableSchema),
+		}).
+		TableRef(ref).
+		Build()
+
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	ctx := context.Background()
+	schema, err := cat.Schema(ctx, "test")
+	if err != nil {
+		t.Fatalf("Schema() failed: %v", err)
+	}
+
+	// Regular table should be accessible
+	table, err := schema.Table(ctx, "regular_table")
+	if err != nil {
+		t.Fatalf("Table() failed: %v", err)
+	}
+	if table == nil {
+		t.Fatal("Expected non-nil table")
+	}
+
+	// Table ref should be accessible
+	schemaWithRefs := schema.(catalog.SchemaWithTableRefs)
+	ref2, err := schemaWithRefs.TableRef(ctx, "csv_ref")
+	if err != nil {
+		t.Fatalf("TableRef() failed: %v", err)
+	}
+	if ref2 == nil {
+		t.Fatal("Expected non-nil table ref")
+	}
+}
+
+// TestCatalogBuilderTableRefConflictsWithTable tests that a table ref
+// name cannot conflict with a regular table name.
+func TestCatalogBuilderTableRefConflictsWithTable(t *testing.T) {
+	tableSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	ref := &mockTableRef{name: "same_name", schema: tableSchema}
+
+	_, err := NewCatalogBuilder().
+		Schema("test").
+		SimpleTable(SimpleTableDef{
+			Name:     "same_name",
+			Schema:   tableSchema,
+			ScanFunc: testScanFunc(tableSchema),
+		}).
+		TableRef(ref).
+		Build()
+
+	if err == nil {
+		t.Error("Expected error for conflicting table and table ref names, got nil")
+	}
+}
+
+// TestCatalogBuilderTableRefWithTableFunc tests that table refs and table functions coexist.
+func TestCatalogBuilderTableRefWithTableFunc(t *testing.T) {
+	refSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	ref := &mockTableRef{name: "csv_ref", schema: refSchema}
+	fn := &mockTableFunc{name: "GENERATE"}
+
+	cat, err := NewCatalogBuilder().
+		Schema("test").
+		TableRef(ref).
+		TableFunc(fn).
+		Build()
+
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	ctx := context.Background()
+	schema, err := cat.Schema(ctx, "test")
+	if err != nil {
+		t.Fatalf("Schema() failed: %v", err)
+	}
+
+	// Table ref should be accessible
+	schemaWithRefs := schema.(catalog.SchemaWithTableRefs)
+	found, err := schemaWithRefs.TableRef(ctx, "csv_ref")
+	if err != nil {
+		t.Fatalf("TableRef() failed: %v", err)
+	}
+	if found == nil {
+		t.Fatal("Expected non-nil table ref")
+	}
+
+	// Table function should be accessible
+	tableFuncs, err := schema.TableFunctions(ctx)
+	if err != nil {
+		t.Fatalf("TableFunctions() failed: %v", err)
+	}
+	if len(tableFuncs) != 1 {
+		t.Errorf("Expected 1 table function, got %d", len(tableFuncs))
+	}
+}
+
+// TestCatalogBuilderMultipleTableRefs tests multiple table refs in the same schema.
+func TestCatalogBuilderMultipleTableRefs(t *testing.T) {
+	schema1 := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	schema2 := arrow.NewSchema([]arrow.Field{
+		{Name: "value", Type: arrow.PrimitiveTypes.Float64},
+	}, nil)
+
+	ref1 := &mockTableRef{name: "ref_a", schema: schema1}
+	ref2 := &mockTableRef{name: "ref_b", schema: schema2}
+
+	cat, err := NewCatalogBuilder().
+		Schema("test").
+		TableRef(ref1).
+		TableRef(ref2).
+		Build()
+
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	ctx := context.Background()
+	schema, err := cat.Schema(ctx, "test")
+	if err != nil {
+		t.Fatalf("Schema() failed: %v", err)
+	}
+
+	schemaWithRefs := schema.(catalog.SchemaWithTableRefs)
+	refs, err := schemaWithRefs.TableRefs(ctx)
+	if err != nil {
+		t.Fatalf("TableRefs() failed: %v", err)
+	}
+
+	if len(refs) != 2 {
+		t.Errorf("Expected 2 table refs, got %d", len(refs))
+	}
+
+	// Both should be individually accessible
+	for _, name := range []string{"ref_a", "ref_b"} {
+		ref, err := schemaWithRefs.TableRef(ctx, name)
+		if err != nil {
+			t.Fatalf("TableRef(%q) failed: %v", name, err)
+		}
+		if ref == nil {
+			t.Errorf("Expected non-nil table ref for %q", name)
+		}
+	}
+}
+
+// TestCatalogBuilderTableRefsInDifferentSchemas tests table refs across schemas.
+func TestCatalogBuilderTableRefsInDifferentSchemas(t *testing.T) {
+	refSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+	}, nil)
+
+	ref1 := &mockTableRef{name: "ref_in_s1", schema: refSchema}
+	ref2 := &mockTableRef{name: "ref_in_s2", schema: refSchema}
+
+	cat, err := NewCatalogBuilder().
+		Schema("schema1").
+		TableRef(ref1).
+		Schema("schema2").
+		TableRef(ref2).
+		Build()
+
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Verify schema1 has ref_in_s1
+	s1, err := cat.Schema(ctx, "schema1")
+	if err != nil {
+		t.Fatalf("Schema(schema1) failed: %v", err)
+	}
+	s1Refs := s1.(catalog.SchemaWithTableRefs)
+	ref, err := s1Refs.TableRef(ctx, "ref_in_s1")
+	if err != nil || ref == nil {
+		t.Errorf("Expected ref_in_s1 in schema1, got ref=%v, err=%v", ref, err)
+	}
+
+	// ref_in_s2 should not be in schema1
+	notFound, err := s1Refs.TableRef(ctx, "ref_in_s2")
+	if err != nil {
+		t.Fatalf("TableRef(ref_in_s2) in schema1 failed: %v", err)
+	}
+	if notFound != nil {
+		t.Error("Expected nil for ref_in_s2 in schema1")
+	}
+
+	// Verify schema2 has ref_in_s2
+	s2, err := cat.Schema(ctx, "schema2")
+	if err != nil {
+		t.Fatalf("Schema(schema2) failed: %v", err)
+	}
+	s2Refs := s2.(catalog.SchemaWithTableRefs)
+	ref, err = s2Refs.TableRef(ctx, "ref_in_s2")
+	if err != nil || ref == nil {
+		t.Errorf("Expected ref_in_s2 in schema2, got ref=%v, err=%v", ref, err)
+	}
+}
+
 // Helper function to check if string contains substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findInString(s, substr))

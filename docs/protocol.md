@@ -326,6 +326,58 @@ For the complete format specification, see the [DuckDB Airport Extension documen
 
 **Note**: Currently, server implementations must parse the raw JSON. Future versions of airport-go will provide helper types and functions for filter interpretation.
 
+## Table Reference Endpoints (data:// URIs)
+
+Table references use `data://` URIs instead of `grpc://` URIs in endpoint responses. When DuckDB receives a `data://` endpoint, it decodes the embedded function call and executes it locally rather than fetching data from the server.
+
+### Protocol Flow
+
+```
+Client                                  Server
+  |                                       |
+  |---- DoAction(endpoints) ------------>|
+  |      (table ref descriptor)           |
+  |                                       |
+  |<---- data:// URI endpoints ----------|
+  |      (encoded function calls)         |
+  |                                       |
+  |---- Execute function locally ------->|
+  |      (e.g., read_csv, read_parquet)   |
+```
+
+### data:// URI Format
+
+```
+data:application/x-msgpack-duckdb-function-call;base64,{BASE64_ENCODED_MSGPACK}
+```
+
+The base64-decoded content is a msgpack map with two fields:
+
+```
+{
+    "function_name": "read_csv",        // DuckDB function to execute (string)
+    "data": <raw Arrow IPC bytes>       // Function arguments (binary)
+}
+```
+
+### Arrow IPC Argument Encoding
+
+Function arguments are encoded as a single-row Arrow IPC stream:
+
+- Positional arguments use field names `arg_0`, `arg_1`, etc.
+- Named arguments use their parameter name as the field name
+- The Arrow IPC uses stream format (not file format)
+
+Example: `read_csv('/data/file.csv', header=true)` encodes as:
+
+| arg_0 (VARCHAR) | header (BOOLEAN) |
+|-----------------|------------------|
+| /data/file.csv  | true             |
+
+### Multiple Endpoints
+
+A single table reference can return multiple function calls, each encoded as a separate `data://` URI in the endpoint response. This enables parallel reads (e.g., one endpoint per partition or file).
+
 ## Time Travel
 
 Airport supports point-in-time queries via the `endpoints` action:

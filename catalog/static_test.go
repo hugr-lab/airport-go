@@ -25,8 +25,8 @@ func testScanFunc(schema *arrow.Schema) ScanFunc {
 func TestStaticCatalogSchemas(t *testing.T) {
 	cat := NewStaticCatalog()
 
-	cat.AddSchema("schema1", "First schema", make(map[string]Table), nil, nil, nil)
-	cat.AddSchema("schema2", "Second schema", make(map[string]Table), nil, nil, nil)
+	cat.AddSchema("schema1", "First schema", make(map[string]Table), nil, nil, nil, nil)
+	cat.AddSchema("schema2", "Second schema", make(map[string]Table), nil, nil, nil, nil)
 
 	ctx := context.Background()
 	schemas, err := cat.Schemas(ctx)
@@ -42,7 +42,7 @@ func TestStaticCatalogSchemas(t *testing.T) {
 // TestStaticCatalogSchemaLookup tests looking up specific schemas.
 func TestStaticCatalogSchemaLookup(t *testing.T) {
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", make(map[string]Table), nil, nil, nil)
+	cat.AddSchema("test", "Test schema", make(map[string]Table), nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -74,7 +74,7 @@ func TestStaticCatalogSchemaLookup(t *testing.T) {
 // TestStaticSchemaComments tests that schema comments are preserved.
 func TestStaticSchemaComments(t *testing.T) {
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "This is a test comment", make(map[string]Table), nil, nil, nil)
+	cat.AddSchema("test", "This is a test comment", make(map[string]Table), nil, nil, nil, nil)
 
 	ctx := context.Background()
 	schema, err := cat.Schema(ctx, "test")
@@ -102,7 +102,7 @@ func TestStaticSchemaTables(t *testing.T) {
 	}
 
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", tables, nil, nil, nil)
+	cat.AddSchema("test", "Test schema", tables, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	schema, err := cat.Schema(ctx, "test")
@@ -133,7 +133,7 @@ func TestStaticSchemaTableLookup(t *testing.T) {
 	}
 
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", tables, nil, nil, nil)
+	cat.AddSchema("test", "Test schema", tables, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	schema, err := cat.Schema(ctx, "test")
@@ -214,7 +214,7 @@ func TestStaticSchemaFunctions(t *testing.T) {
 	mockTable := &mockTableFunc{name: "TEST_TABLE_FUNC"}
 
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", make(map[string]Table), []ScalarFunction{mockScalar}, []TableFunction{mockTable}, nil)
+	cat.AddSchema("test", "Test schema", make(map[string]Table), []ScalarFunction{mockScalar}, []TableFunction{mockTable}, nil, nil)
 
 	ctx := context.Background()
 	schema, err := cat.Schema(ctx, "test")
@@ -253,7 +253,7 @@ func TestStaticCatalogConcurrentAccess(t *testing.T) {
 	}
 
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", tables, nil, nil, nil)
+	cat.AddSchema("test", "Test schema", tables, nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -329,7 +329,7 @@ func TestStaticCatalogContextCancellation(t *testing.T) {
 	}
 
 	cat := NewStaticCatalog()
-	cat.AddSchema("test", "Test schema", tables, nil, nil, nil)
+	cat.AddSchema("test", "Test schema", tables, nil, nil, nil, nil)
 
 	// Create cancelled context
 	ctx, cancel := context.WithCancel(context.Background())

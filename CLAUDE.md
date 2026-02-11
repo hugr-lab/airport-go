@@ -14,6 +14,7 @@ Auto-generated from all feature plans. Last updated: 2025-11-29
 - N/A (pure transformation library) (012-filter-pushdown)
 - Go 1.25+ + Apache Arrow Go v18 (`github.com/apache/arrow-go/v18`), gRPC (013-batch-table-signature)
 - Go 1.25+ + Apache Arrow Go v18, gRPC, google.golang.org/grpc/metadata (001-multicatalog-server)
+- Go 1.25+ (matching existing project) + Apache Arrow Go v18, gRPC, msgpack-go (all existing; no new dependencies) (001-table-ref-support)
 
 ## Project Structure
 
