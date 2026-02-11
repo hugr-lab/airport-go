@@ -13,6 +13,7 @@ Auto-generated from all feature plans. Last updated: 2025-11-29
 - Go 1.25+ (matching existing project) + Standard library only (encoding/json for parsing, strings/fmt for encoding). No new external dependencies required. (012-filter-pushdown)
 - N/A (pure transformation library) (012-filter-pushdown)
 - Go 1.25+ + Apache Arrow Go v18 (`github.com/apache/arrow-go/v18`), gRPC (013-batch-table-signature)
+- Go 1.25+ (matching existing project) + Apache Arrow Go v18, gRPC, msgpack-go (all existing; no new dependencies) (001-table-ref-support)
 
 ## Project Structure
 
@@ -79,9 +80,9 @@ go work sync
 - No silent failures - errors must be handled explicitly
 
 ## Recent Changes
+- 001-table-ref-support: Added Go 1.25+ (matching existing project) + Apache Arrow Go v18, gRPC, msgpack-go (all existing; no new dependencies)
 - 013-batch-table-signature: Added Go 1.25+ + Apache Arrow Go v18 (`github.com/apache/arrow-go/v18`), gRPC
 - 012-filter-pushdown: Added Go 1.25+ (matching existing project) + Standard library only (encoding/json for parsing, strings/fmt for encoding). No new external dependencies required.
-- 001-batch-table-interfaces: Added Go 1.25+ + Apache Arrow Go v18, gRPC, msgpack-go
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->

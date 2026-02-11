@@ -270,8 +270,17 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		return "", "", fmt.Errorf("failed to get table functions (in/out): %w", err)
 	}
 
+	// Check for table references
+	var tableRefs []catalog.TableRef
+	if schemaWithRefs, ok := schema.(catalog.SchemaWithTableRefs); ok {
+		tableRefs, err = schemaWithRefs.TableRefs(ctx)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get table refs: %w", err)
+		}
+	}
+
 	// Create msgpack array of serialized FlightInfo (protobuf) for each table and function
-	flightInfoBytesArray := make([][]byte, 0, len(tables)+len(tableFunctions)+len(scalarFunctions)+len(tableFunctionsInOut))
+	flightInfoBytesArray := make([][]byte, 0, len(tables)+len(tableRefs)+len(tableFunctions)+len(scalarFunctions)+len(tableFunctionsInOut))
 
 	// Serialize tables
 	for _, table := range tables {
@@ -340,6 +349,64 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 		flightInfoBytes, err := proto.Marshal(flightInfo)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to marshal FlightInfo: %w", err)
+		}
+
+		flightInfoBytesArray = append(flightInfoBytesArray, flightInfoBytes)
+	}
+
+	// Serialize table references as type "table" (same as regular tables)
+	for _, ref := range tableRefs {
+		arrowSchema := ref.ArrowSchema()
+		if arrowSchema == nil {
+			continue
+		}
+
+		appMetadata := map[string]any{
+			"type":         "table",
+			"schema":       schema.Name(),
+			"catalog":      s.CatalogName(),
+			"name":         ref.Name(),
+			"comment":      ref.Comment(),
+			"input_schema": nil,
+			"action_name":  nil,
+			"description":  nil,
+			"extra_data":   nil,
+		}
+
+		appMetadataBytes, err := msgpack.Encode(appMetadata)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to encode table ref app metadata: %w", err)
+		}
+
+		descriptor := &flight.FlightDescriptor{
+			Type: flight.DescriptorPATH,
+			Path: []string{schema.Name(), ref.Name()},
+		}
+
+		ticket, err := EncodeTableTicket(s.CatalogName(), schema.Name(), ref.Name())
+		if err != nil {
+			return "", "", fmt.Errorf("failed to encode table ref ticket: %w", err)
+		}
+
+		flightInfo := &flight.FlightInfo{
+			Schema:           flight.SerializeSchema(arrowSchema, s.allocator),
+			FlightDescriptor: descriptor,
+			Endpoint: []*flight.FlightEndpoint{
+				{
+					Ticket: &flight.Ticket{
+						Ticket: ticket,
+					},
+				},
+			},
+			TotalRecords: -1,
+			TotalBytes:   -1,
+			Ordered:      false,
+			AppMetadata:  appMetadataBytes,
+		}
+
+		flightInfoBytes, err := proto.Marshal(flightInfo)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to marshal table ref FlightInfo: %w", err)
 		}
 
 		flightInfoBytesArray = append(flightInfoBytesArray, flightInfoBytes)
@@ -594,6 +661,7 @@ func (s *Server) serializeSchemaContents(ctx context.Context, schema catalog.Sch
 	s.logger.Debug("Serialized schema contents",
 		"schema", schema.Name(),
 		"tables", len(tables),
+		"table_refs", len(tableRefs),
 		"table_functions", len(tableFunctions),
 		"scalar_functions", len(scalarFunctions),
 		"table_functions_in_out", len(tableFunctionsInOut),

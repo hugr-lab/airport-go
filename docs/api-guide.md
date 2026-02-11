@@ -222,6 +222,125 @@ func (t *MyTable) Scan(ctx context.Context, opts *catalog.ScanOptions) (array.Re
 
 For the complete JSON format specification, see the [Airport Extension documentation](https://airport.query.farm/server_predicate_pushdown.html).
 
+## Table References
+
+### catalog.TableRef
+
+Represents a read-only table that delegates data reading to DuckDB function calls via `data://` endpoint URIs. Instead of serving data through Arrow Flight DoGet, a TableRef returns function calls that DuckDB executes locally.
+
+```go
+type TableRef interface {
+    // Name returns the table reference name.
+    Name() string
+
+    // Comment returns optional documentation.
+    Comment() string
+
+    // ArrowSchema returns the Arrow schema describing the columns.
+    ArrowSchema() *arrow.Schema
+
+    // FunctionCalls generates DuckDB function calls for the given request.
+    // Returns at least one function call. Multiple calls enable parallel reads.
+    FunctionCalls(ctx context.Context, req *FunctionCallRequest) ([]FunctionCall, error)
+}
+```
+
+### catalog.DynamicSchemaTableRef
+
+Optional extension for table references with parameter-dependent or time-dependent schemas:
+
+```go
+type DynamicSchemaTableRef interface {
+    TableRef
+
+    // SchemaForRequest returns the schema for a specific request context.
+    SchemaForRequest(ctx context.Context, req *SchemaRequest) (*arrow.Schema, error)
+}
+```
+
+### catalog.FunctionCallRequest
+
+Contains the scan context passed to a TableRef:
+
+```go
+type FunctionCallRequest struct {
+    Filters    string       // JSON filter predicates (empty = no filters)
+    Columns    []string     // Column names for projection (nil = all columns)
+    Parameters []any        // Function parameters from Arrow IPC
+    TimePoint  *TimePoint   // Point-in-time for time-travel queries (nil = current)
+}
+```
+
+### catalog.FunctionCall and FunctionCallArg
+
+Represents a DuckDB function call and its arguments:
+
+```go
+type FunctionCall struct {
+    FunctionName string            // DuckDB function name (e.g., "read_csv")
+    Args         []FunctionCallArg // Function arguments
+}
+
+type FunctionCallArg struct {
+    Name  string         // Parameter name (empty = positional arg)
+    Value any            // Argument value
+    Type  arrow.DataType // Arrow data type for encoding
+}
+```
+
+Supported Value types: `string`, `bool`, `int`, `int8`-`int64`, `uint8`-`uint64`, `float32`, `float64`, `time.Time`, `orb.Geometry`, `[]byte`, `[]any`, `map[string]any`.
+
+### catalog.SchemaWithTableRefs
+
+Optional extension interface for schemas containing table references:
+
+```go
+type SchemaWithTableRefs interface {
+    // TableRefs returns all table references in this schema.
+    TableRefs(ctx context.Context) ([]TableRef, error)
+
+    // TableRef returns a specific table reference by name.
+    // Returns (nil, nil) if not found.
+    TableRef(ctx context.Context, name string) (TableRef, error)
+}
+```
+
+### Using Table References with CatalogBuilder
+
+```go
+cat, err := airport.NewCatalogBuilder().
+    Schema("data").
+    TableRef(&myCSVRef{}).
+    TableRef(&myParquetRef{}).
+    Build()
+```
+
+**Example Implementation:**
+
+```go
+type csvRef struct {
+    url string
+}
+
+func (r *csvRef) Name() string              { return "orders" }
+func (r *csvRef) Comment() string            { return "Order data" }
+func (r *csvRef) ArrowSchema() *arrow.Schema { return orderSchema }
+
+func (r *csvRef) FunctionCalls(ctx context.Context, req *catalog.FunctionCallRequest) ([]catalog.FunctionCall, error) {
+    return []catalog.FunctionCall{
+        {
+            FunctionName: "read_csv",
+            Args: []catalog.FunctionCallArg{
+                {Value: r.url, Type: arrow.BinaryTypes.String},
+                {Name: "header", Value: true, Type: arrow.FixedWidthTypes.Boolean},
+            },
+        },
+    }, nil
+}
+```
+
+See [examples/tableref](../examples/tableref/) for a complete example.
+
 ## DML Interfaces
 
 ### catalog.InsertableTable
@@ -792,6 +911,9 @@ builder.SimpleTable(airport.SimpleTableDef{
 
 // Add a table implementing catalog.Table interface
 builder.Table(myTableImpl)
+
+// Add a table reference (data:// URI delegation)
+builder.TableRef(myTableRef)
 
 // Add a scalar function
 builder.ScalarFunc(airport.ScalarFuncDef{

@@ -114,6 +114,18 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 				return nil, fmt.Errorf("table %s.%s has nil scan function", sb.name, table.Name)
 			}
 		}
+
+		// Validate table ref names within schema
+		for _, ref := range sb.tableRefs {
+			name := ref.Name()
+			if name == "" {
+				return nil, fmt.Errorf("table ref name cannot be empty in schema %s", sb.name)
+			}
+			if tableNames[name] {
+				return nil, fmt.Errorf("duplicate table name %s in schema %s", name, sb.name)
+			}
+			tableNames[name] = true
+		}
 	}
 
 	cb.built = true
@@ -137,8 +149,14 @@ func (cb *CatalogBuilder) Build() (catalog.Catalog, error) {
 			tables[customTable.Name()] = customTable
 		}
 
+		// Build table refs map
+		tableRefs := make(map[string]catalog.TableRef)
+		for _, ref := range sb.tableRefs {
+			tableRefs[ref.Name()] = ref
+		}
+
 		// Add schema to catalog
-		cat.AddSchema(sb.name, sb.comment, tables, sb.scalarFuncs, sb.tableFuncs, sb.tableFuncsInOut)
+		cat.AddSchema(sb.name, sb.comment, tables, sb.scalarFuncs, sb.tableFuncs, sb.tableFuncsInOut, tableRefs)
 	}
 
 	return cat, nil
@@ -156,6 +174,7 @@ type schemaBuilder struct {
 	comment         string
 	tables          []SimpleTableDef
 	customTables    []catalog.Table
+	tableRefs       []catalog.TableRef
 	scalarFuncs     []catalog.ScalarFunction
 	tableFuncs      []catalog.TableFunction
 	tableFuncsInOut []catalog.TableFunctionInOut
@@ -196,6 +215,20 @@ func (sb *SchemaBuilder) SimpleTable(def SimpleTableDef) *SchemaBuilder {
 //	schema.Table(&MyCustomTable{})
 func (sb *SchemaBuilder) Table(table catalog.Table) *SchemaBuilder {
 	sb.builder.customTables = append(sb.builder.customTables, table)
+	return sb
+}
+
+// TableRef registers a table reference in this schema.
+// Table references appear as read-only tables in the DuckDB catalog
+// but delegate data reading to DuckDB function calls via data:// URIs.
+// Returns self for method chaining.
+// Table reference name MUST be unique within schema.
+//
+// Example:
+//
+//	schema.TableRef(&myCSVRef{})
+func (sb *SchemaBuilder) TableRef(ref catalog.TableRef) *SchemaBuilder {
+	sb.builder.tableRefs = append(sb.builder.tableRefs, ref)
 	return sb
 }
 

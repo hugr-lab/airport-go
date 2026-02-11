@@ -23,11 +23,12 @@ func NewStaticCatalog() *staticCatalog {
 // AddSchema adds a schema to the static catalog.
 // This is used during catalog building.
 // Tables can be any implementation of the Table interface, including DynamicSchemaTable.
-func (c *staticCatalog) AddSchema(name, comment string, tables map[string]Table, scalarFuncs []ScalarFunction, tableFuncs []TableFunction, tableFuncsInOut []TableFunctionInOut) {
+func (c *staticCatalog) AddSchema(name, comment string, tables map[string]Table, scalarFuncs []ScalarFunction, tableFuncs []TableFunction, tableFuncsInOut []TableFunctionInOut, tableRefs map[string]TableRef) {
 	c.schemas[name] = &staticSchema{
 		name:            name,
 		comment:         comment,
 		tables:          tables,
+		tableRefs:       tableRefs,
 		scalarFuncs:     scalarFuncs,
 		tableFuncs:      tableFuncs,
 		tableFuncsInOut: tableFuncsInOut,
@@ -68,6 +69,7 @@ type staticSchema struct {
 	name            string
 	comment         string
 	tables          map[string]Table
+	tableRefs       map[string]TableRef
 	scalarFuncs     []ScalarFunction
 	tableFuncs      []TableFunction
 	tableFuncsInOut []TableFunctionInOut
@@ -114,6 +116,24 @@ func (s *staticSchema) TableFunctions(ctx context.Context) ([]TableFunction, err
 // TableFunctionsInOut implements Schema interface.
 func (s *staticSchema) TableFunctionsInOut(ctx context.Context) ([]TableFunctionInOut, error) {
 	return s.tableFuncsInOut, nil
+}
+
+// TableRefs implements SchemaWithTableRefs interface.
+func (s *staticSchema) TableRefs(ctx context.Context) ([]TableRef, error) {
+	result := make([]TableRef, 0, len(s.tableRefs))
+	for _, ref := range s.tableRefs {
+		result = append(result, ref)
+	}
+	return result, nil
+}
+
+// TableRef implements SchemaWithTableRefs interface.
+func (s *staticSchema) TableRef(ctx context.Context, name string) (TableRef, error) {
+	ref, ok := s.tableRefs[name]
+	if !ok {
+		return nil, nil // Not found, not an error
+	}
+	return ref, nil
 }
 
 // StaticTable is an immutable table implementation.
