@@ -15,26 +15,26 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Lint main module
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6.2
+          version: v2.11.1
           args: --timeout=5m
 
       - name: Lint examples module
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6.2
+          version: v2.11.1
           args: --timeout=5m
           working-directory: examples
 
       - name: Lint tests module
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6.2
+          version: v2.11.1
           args: --timeout=5m
           working-directory: tests
 
@@ -46,7 +46,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Run main module tests

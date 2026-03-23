@@ -646,7 +646,7 @@ func (e *DuckDBEncoder) formatBlobValue(data any) string {
 		var sb strings.Builder
 		sb.WriteString("'\\x")
 		for _, b := range v {
-			sb.WriteString(fmt.Sprintf("%02x", b))
+			fmt.Fprintf(&sb, "%02x", b)
 		}
 		sb.WriteString("'")
 		return sb.String()

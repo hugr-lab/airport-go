@@ -11,8 +11,8 @@ This example demonstrates time travel support in an Airport Flight server, allow
 
 ## Prerequisites
 
-- Go 1.25+
-- DuckDB 1.4+ (for client testing)
+- Go 1.26+
+- DuckDB 1.5+ (for client testing)
 - Airport extension for DuckDB
 
 ## Running the Server

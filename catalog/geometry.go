@@ -7,6 +7,7 @@ import (
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/wkb"
 )
@@ -29,8 +30,114 @@ func NewGeometryExtensionType() *GeometryExtensionType {
 
 // ArrayType returns the Go type for geometry arrays.
 func (g *GeometryExtensionType) ArrayType() reflect.Type {
-	return reflect.TypeOf((*array.Binary)(nil))
+	return reflect.TypeOf(GeometryArray{})
 }
+
+// GeometryArray is an extension array for geometry data stored as WKB.
+// It wraps the underlying Binary storage array and provides geometry-specific methods.
+type GeometryArray struct {
+	array.ExtensionArrayBase
+}
+
+// ValueBytes returns the WKB bytes at index i.
+func (a *GeometryArray) ValueBytes(i int) []byte {
+	return a.Storage().(*array.Binary).Value(i)
+}
+
+// Value returns the decoded geometry at index i.
+func (a *GeometryArray) Value(i int) (orb.Geometry, error) {
+	if a.IsNull(i) {
+		return nil, nil
+	}
+	return DecodeGeometry(a.ValueBytes(i))
+}
+
+// String returns a string representation of the array.
+func (a *GeometryArray) String() string {
+	return fmt.Sprintf("GeometryArray{len=%d}", a.Len())
+}
+
+// GetOneForMarshal implements arrow.Array.
+func (a *GeometryArray) GetOneForMarshal(i int) any {
+	if a.IsNull(i) {
+		return nil
+	}
+	return a.ValueBytes(i)
+}
+
+var _ array.ExtensionArray = (*GeometryArray)(nil)
+
+// GeometryBuilder is a builder for GeometryArray that provides convenient methods
+// for appending geometry values. It wraps the underlying Binary storage builder.
+type GeometryBuilder struct {
+	*array.ExtensionBuilder
+}
+
+// NewGeometryBuilder creates a new GeometryBuilder with the given memory allocator.
+func NewGeometryBuilder(mem memory.Allocator) *GeometryBuilder {
+	return &GeometryBuilder{
+		ExtensionBuilder: array.NewExtensionBuilder(mem, NewGeometryExtensionType()),
+	}
+}
+
+// storageBuilder returns the underlying Binary builder.
+func (b *GeometryBuilder) storageBuilder() *array.BinaryBuilder {
+	return b.Builder.(*array.BinaryBuilder)
+}
+
+// Append encodes and appends a geometry value.
+func (b *GeometryBuilder) Append(geom orb.Geometry) error {
+	wkbBytes, err := EncodeGeometry(geom)
+	if err != nil {
+		return err
+	}
+	b.storageBuilder().Append(wkbBytes)
+	return nil
+}
+
+// AppendWKB appends raw WKB bytes directly.
+func (b *GeometryBuilder) AppendWKB(wkbBytes []byte) {
+	b.storageBuilder().Append(wkbBytes)
+}
+
+// AppendNull appends a null value.
+func (b *GeometryBuilder) AppendNull() {
+	b.storageBuilder().AppendNull()
+}
+
+// AppendValues appends multiple geometry values with optional validity mask.
+func (b *GeometryBuilder) AppendValues(geoms []orb.Geometry, valid []bool) error {
+	if len(valid) != 0 && len(geoms) != len(valid) {
+		return fmt.Errorf("len(geoms) != len(valid): %d != %d", len(geoms), len(valid))
+	}
+
+	for i, geom := range geoms {
+		if len(valid) > 0 && !valid[i] {
+			b.AppendNull()
+			continue
+		}
+		if err := b.Append(geom); err != nil {
+			return fmt.Errorf("geometry[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// NewGeometryArray creates a GeometryArray from the accumulated values and resets the builder.
+func (b *GeometryBuilder) NewGeometryArray() *GeometryArray {
+	return b.NewExtensionArray().(*GeometryArray)
+}
+
+// NewBuilder implements array.CustomExtensionBuilder.
+// This enables automatic use of GeometryBuilder when creating builders via array.NewBuilder.
+func (g *GeometryExtensionType) NewBuilder(mem memory.Allocator) array.Builder {
+	return NewGeometryBuilder(mem)
+}
+
+var (
+	_ array.Builder                = (*GeometryBuilder)(nil)
+	_ array.CustomExtensionBuilder = (*GeometryExtensionType)(nil)
+)
 
 // ExtensionName returns the extension type identifier.
 // Uses "geoarrow.wkb" for maximum compatibility with GeoArrow and DuckDB.

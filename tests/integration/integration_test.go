@@ -17,6 +17,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/paulmach/orb"
 
 	"github.com/hugr-lab/airport-go"
 	"github.com/hugr-lab/airport-go/catalog"
@@ -282,6 +283,14 @@ func buildTestRecord(schema *arrow.Schema, data [][]any) arrow.RecordBatch {
 				builder.Field(i).(*array.Date32Builder).Append(arrow.Date32(val.(int32)))
 			case arrow.TIMESTAMP:
 				builder.Field(i).(*array.TimestampBuilder).Append(arrow.Timestamp(val.(int64)))
+			case arrow.EXTENSION:
+				switch b := builder.Field(i).(type) {
+				case *catalog.GeometryBuilder:
+					b.Append(val.(orb.Geometry))
+				default:
+					// For unsupported extension types, skip or panic
+					panic("unsupported extension type in buildTestRecord: " + field.Type.String())
+				}
 			default:
 				// For unsupported types, skip or panic
 				panic("unsupported Arrow type in buildTestRecord: " + field.Type.String())

@@ -3,6 +3,7 @@ package flight
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -43,9 +44,6 @@ func (s *Server) handleDoExchangeInsert(ctx context.Context, stream flight.Fligh
 		"table", tableName,
 		"return_data", returnData,
 	)
-
-	// Get transaction context
-	ctx = s.getTransactionContext(ctx)
 
 	// Look up schema
 	schema, err := s.catalog.Schema(ctx, schemaName)
@@ -262,9 +260,6 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 		"return_data", returnData,
 	)
 
-	// Get transaction context
-	ctx = s.getTransactionContext(ctx)
-
 	// Look up schema
 	schema, err := s.catalog.Schema(ctx, schemaName)
 	if err != nil {
@@ -410,7 +405,12 @@ func (s *Server) handleDoExchangeUpdate(ctx context.Context, stream flight.Fligh
 			)
 			// Transform batch to match writer's expected schema (outputSchema)
 			// The table may return data with slightly different schema
-			transformedBatch := transformBatchSchema(batch, outputSchema, s.allocator)
+			transformedBatch, err := transformBatchSchema(batch, outputSchema, s.allocator)
+			if err != nil {
+				s.logger.Error("Failed to transform UPDATE RETURNING batch", "error", err)
+				batch.Release()
+				return err
+			}
 			if transformedBatch != batch {
 				batch.Release() // Release original if transformed
 			}
@@ -459,9 +459,6 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		"table", tableName,
 		"return_data", returnData,
 	)
-
-	// Get transaction context
-	ctx = s.getTransactionContext(ctx)
 
 	// Look up schema
 	schema, err := s.catalog.Schema(ctx, schemaName)
@@ -600,7 +597,12 @@ func (s *Server) handleDoExchangeDelete(ctx context.Context, stream flight.Fligh
 		for batch := range outputCh {
 			// Transform batch to match writer's expected schema (outputSchema)
 			// The table may return data with slightly different schema (e.g., different metadata)
-			transformedBatch := transformBatchSchema(batch, outputSchema, s.allocator)
+			transformedBatch, err := transformBatchSchema(batch, outputSchema, s.allocator)
+			if err != nil {
+				s.logger.Error("Failed to transform DELETE RETURNING batch", "error", err)
+				batch.Release()
+				return err
+			}
 			if transformedBatch != batch {
 				batch.Release() // Release original if transformed
 			}
@@ -716,10 +718,10 @@ func getTableColumnNames(table catalog.Table) []string {
 // This is needed when the table returns data with a slightly different schema
 // (e.g., different nullable flags or metadata) than what the writer expects.
 // If schemas match, returns the original batch unchanged.
-func transformBatchSchema(batch arrow.RecordBatch, targetSchema *arrow.Schema, alloc memory.Allocator) arrow.RecordBatch {
+func transformBatchSchema(batch arrow.RecordBatch, targetSchema *arrow.Schema, alloc memory.Allocator) (arrow.RecordBatch, error) {
 	batchSchema := batch.Schema()
 	if batchSchema.Equal(targetSchema) {
-		return batch // No transformation needed
+		return batch, nil // No transformation needed
 	}
 
 	// Build column name to batch column index mapping
@@ -733,16 +735,29 @@ func transformBatchSchema(batch arrow.RecordBatch, targetSchema *arrow.Schema, a
 	numRows := batch.NumRows()
 	for i := 0; i < targetSchema.NumFields(); i++ {
 		targetField := targetSchema.Field(i)
-		if batchIdx, ok := colNameToIdx[targetField.Name]; ok {
-			// Column exists in batch - use it directly
-			// The data is the same, just the schema metadata differs
-			cols[i] = batch.Column(batchIdx)
-			cols[i].Retain()
-		} else {
+		batchIdx, ok := colNameToIdx[targetField.Name]
+		if !ok {
 			// Column doesn't exist in batch - create null array
 			// This happens when RETURNING data doesn't include pseudo-columns like rowid
 			cols[i] = makeNullArray(alloc, targetField.Type, int(numRows))
+			continue
 		}
+
+		// Column exists in batch - use it directly
+		// The data is the same, just the schema metadata differs
+		col := batch.Column(batchIdx)
+		if !arrow.TypeEqual(targetField.Type, col.DataType()) {
+			var err error
+			col, err = transformArray(col, targetField.Type, alloc)
+			if err != nil {
+				for j := 0; j < i; j++ {
+					cols[j].Release()
+				}
+				return nil, err
+			}
+		}
+		cols[i] = col
+		cols[i].Retain()
 	}
 
 	// Create new record batch with target schema
@@ -755,7 +770,49 @@ func transformBatchSchema(batch arrow.RecordBatch, targetSchema *arrow.Schema, a
 		}
 	}
 
-	return newBatch
+	return newBatch, nil
+}
+
+func transformArray(arr arrow.Array, targetType arrow.DataType, alloc memory.Allocator) (arrow.Array, error) {
+	if arrow.TypeEqual(arr.DataType(), targetType) {
+		return arr, nil
+	}
+	switch t := targetType.(type) {
+	case *arrow.TimestampType:
+		_, ok := arr.DataType().(*arrow.TimestampType)
+		if !ok {
+			return nil, &DMLError{
+				Code:    "SCHEMA_MISMATCH",
+				Message: fmt.Sprintf("cannot convert type %s to %s", arr.DataType().Name(), targetType.Name()),
+			}
+		}
+		return transformTimestampArray(arr.(*array.Timestamp), t, alloc)
+	default:
+		return nil, &DMLError{
+			Code:    "SCHEMA_MISMATCH",
+			Message: fmt.Sprintf("column type mismatch and transformation not implemented: %s -> %s", arr.DataType().Name(), targetType.Name()),
+		}
+	}
+
+}
+
+func transformTimestampArray(arr *array.Timestamp, targetType *arrow.TimestampType, alloc memory.Allocator) (arrow.Array, error) {
+	t := arr.DataType().(*arrow.TimestampType)
+	if t.Unit == targetType.Unit && t.TimeZone == targetType.TimeZone {
+		return arr, nil
+	}
+	defer arr.Release()
+	transformed := array.NewTimestampBuilder(alloc, targetType)
+	defer transformed.Release()
+	for i := 0; i < arr.Len(); i++ {
+		if arr.IsNull(i) {
+			transformed.AppendNull()
+			continue
+		}
+		transformed.AppendTime(arr.Value(i).ToTime(t.Unit))
+	}
+
+	return transformed.NewArray(), nil
 }
 
 // makeNullArray creates an array of null values for the given Arrow type.

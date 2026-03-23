@@ -3,7 +3,7 @@ package flight
 import (
 	"context"
 
-	"github.com/hugr-lab/airport-go/internal/txcontext"
+	"github.com/hugr-lab/airport-go/catalog"
 )
 
 // withTransaction wraps a DML operation with automatic transaction commit/rollback.
@@ -14,9 +14,7 @@ import (
 // On failure: rolls back the transaction (if present)
 func (s *Server) withTransaction(ctx context.Context, fn func(context.Context) error) error {
 	// Extract and store transaction ID in context
-	ctx = txcontext.ExtractAndStoreTransactionID(ctx)
-
-	txID, _ := txcontext.TransactionIDFromContext(ctx)
+	txID, _ := catalog.TransactionIDFromContext(ctx)
 	if txID == "" || s.txManager == nil {
 		// No transaction - execute directly
 		return fn(ctx)
@@ -44,10 +42,4 @@ func (s *Server) withTransaction(ctx context.Context, fn func(context.Context) e
 	}
 
 	return nil
-}
-
-// getTransactionContext extracts transaction ID from gRPC metadata and returns
-// a context with the transaction ID stored for downstream use.
-func (s *Server) getTransactionContext(ctx context.Context) context.Context {
-	return txcontext.ExtractAndStoreTransactionID(ctx)
 }

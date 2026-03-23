@@ -8,8 +8,8 @@ This example demonstrates a dynamic Airport Flight catalog with:
 
 ## Prerequisites
 
-- Go 1.25+
-- DuckDB 1.4+ (for client testing)
+- Go 1.26+
+- DuckDB 1.5+ (for client testing)
 - Airport extension for DuckDB
 
 ## Installation
@@ -45,7 +45,7 @@ LOAD airport;
 -- Connect as regular user
 CREATE OR REPLACE SECRET demo_secret (
     TYPE airport,
-    LOCATION 'grpc://localhost:50053',
+    SCOPE 'grpc://localhost:50053',
     auth_token 'user-token'
 );
 
@@ -68,7 +68,7 @@ Connect with admin token (sees both schemas):
 -- Connect as admin
 CREATE OR REPLACE SECRET demo_secret (
     TYPE airport,
-    LOCATION 'grpc://localhost:50053',
+    SCOPE 'grpc://localhost:50053',
     auth_token 'admin-token'
 );
 

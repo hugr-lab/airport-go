@@ -11,8 +11,8 @@ This example demonstrates DDL (Data Definition Language) support in an Airport F
 
 ## Prerequisites
 
-- Go 1.25+
-- DuckDB 1.4+ (for client testing)
+- Go 1.26+
+- DuckDB 1.5+ (for client testing)
 - Airport extension for DuckDB
 
 ## Running the Server

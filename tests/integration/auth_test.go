@@ -26,7 +26,9 @@ func TestAuthentication(t *testing.T) {
 		}
 	})
 
-	// Test 2: Request with invalid token should fail
+	// Test 2: Request with invalid token should fail on data access.
+	// Note: DuckDB may not send any RPC during ATTACH with an invalid token,
+	// so auth failure is only observable when querying data.
 	t.Run("InvalidToken", func(t *testing.T) {
 		attachName := "test_invalid"
 
@@ -39,6 +41,13 @@ func TestAuthentication(t *testing.T) {
 
 		query := "ATTACH '' AS " + attachName + " (TYPE airport, SECRET invalid_secret, LOCATION 'grpc://" + server.address + "')"
 		_, err = db.Exec(query)
+		if err != nil {
+			// ATTACH rejected early — expected
+			return
+		}
+
+		// ATTACH succeeded without RPC, auth enforced on data access
+		_, err = db.Query("SELECT * FROM " + attachName + ".secure.secrets")
 		if err == nil {
 			t.Error("Expected authentication error with invalid token, but query succeeded")
 		}
@@ -197,11 +206,21 @@ func TestTokenValidation(t *testing.T) {
 			query := "ATTACH '' AS " + attachName + " (TYPE airport, SECRET " + secretName + ", LOCATION 'grpc://" + server.address + "')"
 			_, err = db.Exec(query)
 
-			if tc.shouldWork && err != nil {
-				t.Errorf("%s: Expected success, but got error: %v", tc.description, err)
+			if tc.shouldWork {
+				if err != nil {
+					t.Errorf("%s: Expected success, but got error: %v", tc.description, err)
+				}
+				return
 			}
 
-			if !tc.shouldWork && err == nil {
+			// For invalid tokens: ATTACH may succeed (DuckDB doesn't always send RPCs),
+			// but data access must fail.
+			if err != nil {
+				return // ATTACH rejected early — expected
+			}
+
+			_, queryErr := db.Query("SELECT * FROM " + attachName + ".secure.secrets")
+			if queryErr == nil {
 				t.Errorf("%s: Expected failure, but query succeeded", tc.description)
 			}
 		})
