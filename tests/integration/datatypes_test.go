@@ -61,9 +61,6 @@ func TestGeometryTypes(t *testing.T) {
 	if _, err := db.Exec("INSTALL spatial;LOAD spatial;"); err != nil {
 		t.Skipf("Spatial extension not available: %v", err)
 	}
-	if _, err := db.Exec("FROM register_geoarrow_extensions();"); err != nil {
-		t.Skipf("Failed to register geoarrow extensions: %v", err)
-	}
 
 	attachName := connectToFlightServer(t, db, server.address, "")
 

@@ -2,10 +2,12 @@ package airport_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"log/slog"
 	"net"
+	"slices"
 	"testing"
 	"time"
 
@@ -313,15 +315,7 @@ func TestMultiCatalogCatalogDiscovery(t *testing.T) {
 		}
 
 		// Should have "default_schema" schema from default catalog
-		found := false
-		for _, s := range schemas {
-			if s == "default_schema" {
-				found = true
-				break
-			}
-		}
-
-		if !found {
+		if !slices.Contains(schemas, "default_schema") {
 			t.Errorf("Expected to find 'default_schema' schema, got schemas: %v", schemas)
 		}
 	})
@@ -345,53 +339,27 @@ func TestMultiCatalogCatalogDiscovery(t *testing.T) {
 		}
 
 		// Should have "users" table from default catalog
-		found := false
-		for _, table := range tables {
-			if table == "users" {
-				found = true
-				break
-			}
-		}
-
-		if !found {
+		if !slices.Contains(tables, "users") {
 			t.Errorf("Expected to find 'users' table from default catalog, got tables: %v", tables)
 		}
 	})
 }
 
-// TestMultiCatalogHeaderRouting tests that requests are routed to the correct catalog
-// based on the airport-catalog header.
-//
-// SKIP: This test requires the airport-catalog header to be implemented in the
-// DuckDB Airport extension. The feature is pending merge.
-func TestMultiCatalogHeaderRouting(t *testing.T) {
-	t.Skip("Skipping: airport-catalog header not yet implemented in DuckDB Airport extension")
+// connectMultiCatalog attaches a specific named catalog from a multi-catalog server.
+// The catalogName is passed as the ATTACH name which DuckDB sends as the airport-catalog header.
+func connectMultiCatalog(t *testing.T, db *sql.DB, address, catalogName, attachName string) {
+	t.Helper()
 
-	salesCatalog := createSalesNamedCatalog()
-	analyticsCatalog := createAnalyticsNamedCatalog()
-
-	server := newMultiCatalogTestServer(t, []catalog.Catalog{salesCatalog, analyticsCatalog})
-	defer server.stop()
-
-	db := openDuckDB(t)
-	defer db.Close()
-
-	// TODO: Once airport-catalog header is supported in DuckDB extension:
-	// 1. Attach with catalog header specifying "sales"
-	// 2. Query should return orders table data
-	// 3. Attach with catalog header specifying "analytics"
-	// 4. Query should return metrics table data
-
-	_ = server.address
+	query := fmt.Sprintf("ATTACH '%s' AS %s (TYPE airport, LOCATION 'grpc://%s')", catalogName, attachName, address)
+	_, err := db.Exec(query)
+	if err != nil {
+		t.Fatalf("Failed to attach catalog %q: %v", catalogName, err)
+	}
 }
 
-// TestMultiCatalogHeaderDiscovery tests that catalog discovery works with specific catalog headers.
-//
-// SKIP: This test requires the airport-catalog header to be implemented in the
-// DuckDB Airport extension. The feature is pending merge.
-func TestMultiCatalogHeaderDiscovery(t *testing.T) {
-	t.Skip("Skipping: airport-catalog header not yet implemented in DuckDB Airport extension")
-
+// TestMultiCatalogHeaderRouting tests that requests are routed to the correct catalog
+// based on the airport-catalog header (DuckDB 1.5+).
+func TestMultiCatalogHeaderRouting(t *testing.T) {
 	salesCatalog := createSalesNamedCatalog()
 	analyticsCatalog := createAnalyticsNamedCatalog()
 
@@ -401,11 +369,263 @@ func TestMultiCatalogHeaderDiscovery(t *testing.T) {
 	db := openDuckDB(t)
 	defer db.Close()
 
-	// TODO: Once airport-catalog header is supported in DuckDB extension:
-	// 1. Attach to sales catalog with header
-	// 2. Verify only sales tables (orders) are visible
-	// 3. Attach to analytics catalog with header
-	// 4. Verify only analytics tables (metrics) are visible
+	// Attach sales catalog
+	connectMultiCatalog(t, db, server.address, "sales", "sales_db")
 
-	_ = server.address
+	t.Run("QuerySalesCatalog", func(t *testing.T) {
+		rows, err := db.Query("SELECT order_id, customer, amount FROM sales_db.sales_schema.orders ORDER BY order_id")
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		defer rows.Close()
+
+		type order struct {
+			OrderID  int64
+			Customer string
+			Amount   float64
+		}
+
+		expected := []order{
+			{1001, "Acme Corp", 1500.00},
+			{1002, "Widgets Inc", 2300.50},
+			{1003, "TechStart", 890.75},
+		}
+
+		var got []order
+		for rows.Next() {
+			var o order
+			if err := rows.Scan(&o.OrderID, &o.Customer, &o.Amount); err != nil {
+				t.Fatalf("Failed to scan row: %v", err)
+			}
+			got = append(got, o)
+		}
+
+		if len(got) != len(expected) {
+			t.Fatalf("Expected %d rows, got %d", len(expected), len(got))
+		}
+
+		for i, e := range expected {
+			if got[i] != e {
+				t.Errorf("Row %d: expected %+v, got %+v", i, e, got[i])
+			}
+		}
+	})
+
+	// Attach analytics catalog
+	connectMultiCatalog(t, db, server.address, "analytics", "analytics_db")
+
+	t.Run("QueryAnalyticsCatalog", func(t *testing.T) {
+		rows, err := db.Query("SELECT metric_name, value FROM analytics_db.analytics_schema.metrics ORDER BY metric_name")
+		if err != nil {
+			t.Fatalf("Query failed: %v", err)
+		}
+		defer rows.Close()
+
+		type metric struct {
+			Name  string
+			Value float64
+		}
+
+		expected := []metric{
+			{"conversions", 342},
+			{"page_views", 15234},
+		}
+
+		var got []metric
+		for rows.Next() {
+			var m metric
+			if err := rows.Scan(&m.Name, &m.Value); err != nil {
+				t.Fatalf("Failed to scan row: %v", err)
+			}
+			got = append(got, m)
+		}
+
+		if len(got) != len(expected) {
+			t.Fatalf("Expected %d rows, got %d", len(expected), len(got))
+		}
+
+		for i, e := range expected {
+			if got[i] != e {
+				t.Errorf("Row %d: expected %+v, got %+v", i, e, got[i])
+			}
+		}
+	})
+}
+
+// TestMultiCatalogHeaderDiscovery tests that catalog discovery works with specific
+// catalog headers, each catalog exposing only its own schemas and tables.
+func TestMultiCatalogHeaderDiscovery(t *testing.T) {
+	salesCatalog := createSalesNamedCatalog()
+	analyticsCatalog := createAnalyticsNamedCatalog()
+
+	server := newMultiCatalogTestServer(t, []catalog.Catalog{salesCatalog, analyticsCatalog})
+	defer server.stop()
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	// Attach sales catalog
+	connectMultiCatalog(t, db, server.address, "sales", "sales_db")
+
+	t.Run("SalesSchemas", func(t *testing.T) {
+		rows, err := db.Query("SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'sales_db'")
+		if err != nil {
+			t.Fatalf("Failed to query schemas: %v", err)
+		}
+		defer rows.Close()
+
+		var schemas []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatalf("Failed to scan schema: %v", err)
+			}
+			schemas = append(schemas, name)
+		}
+
+		if !slices.Contains(schemas, "sales_schema") {
+			t.Errorf("Expected sales_schema in schemas: %v", schemas)
+		}
+		if slices.Contains(schemas, "analytics_schema") {
+			t.Error("Sales catalog should not contain analytics_schema")
+		}
+	})
+
+	t.Run("SalesTables", func(t *testing.T) {
+		rows, err := db.Query("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'sales_schema' AND database_name = 'sales_db'")
+		if err != nil {
+			t.Fatalf("Failed to query tables: %v", err)
+		}
+		defer rows.Close()
+
+		var tables []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatalf("Failed to scan table: %v", err)
+			}
+			tables = append(tables, name)
+		}
+
+		if !slices.Contains(tables, "orders") {
+			t.Errorf("Expected 'orders' table in sales catalog, got: %v", tables)
+		}
+	})
+
+	// Attach analytics catalog
+	connectMultiCatalog(t, db, server.address, "analytics", "analytics_db")
+
+	t.Run("AnalyticsSchemas", func(t *testing.T) {
+		rows, err := db.Query("SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'analytics_db'")
+		if err != nil {
+			t.Fatalf("Failed to query schemas: %v", err)
+		}
+		defer rows.Close()
+
+		var schemas []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatalf("Failed to scan schema: %v", err)
+			}
+			schemas = append(schemas, name)
+		}
+
+		if !slices.Contains(schemas, "analytics_schema") {
+			t.Errorf("Expected analytics_schema in schemas: %v", schemas)
+		}
+		if slices.Contains(schemas, "sales_schema") {
+			t.Error("Analytics catalog should not contain sales_schema")
+		}
+	})
+
+	t.Run("AnalyticsTables", func(t *testing.T) {
+		rows, err := db.Query("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'analytics_schema' AND database_name = 'analytics_db'")
+		if err != nil {
+			t.Fatalf("Failed to query tables: %v", err)
+		}
+		defer rows.Close()
+
+		var tables []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatalf("Failed to scan table: %v", err)
+			}
+			tables = append(tables, name)
+		}
+
+		if !slices.Contains(tables, "metrics") {
+			t.Errorf("Expected 'metrics' table in analytics catalog, got: %v", tables)
+		}
+	})
+}
+
+// TestMultiCatalogDynamicAddAndQuery tests adding a catalog dynamically and querying it.
+func TestMultiCatalogDynamicAddAndQuery(t *testing.T) {
+	salesCatalog := createSalesNamedCatalog()
+
+	server := newMultiCatalogTestServer(t, []catalog.Catalog{salesCatalog})
+	defer server.stop()
+
+	// Dynamically add analytics catalog
+	analyticsCatalog := createAnalyticsNamedCatalog()
+	if err := server.mcs.AddCatalog(analyticsCatalog); err != nil {
+		t.Fatalf("Failed to add analytics catalog: %v", err)
+	}
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	// Should be able to query the dynamically added catalog
+	connectMultiCatalog(t, db, server.address, "analytics", "analytics_db")
+
+	rows, err := db.Query("SELECT metric_name FROM analytics_db.analytics_schema.metrics ORDER BY metric_name")
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("Failed to scan row: %v", err)
+		}
+		names = append(names, name)
+	}
+
+	if len(names) != 2 {
+		t.Fatalf("Expected 2 metrics, got %d", len(names))
+	}
+	if names[0] != "conversions" || names[1] != "page_views" {
+		t.Errorf("Expected [conversions, page_views], got %v", names)
+	}
+}
+
+// TestMultiCatalogInvalidCatalog tests that querying a non-existent catalog fails.
+// DuckDB ATTACH may succeed, but subsequent queries should fail with catalog not found.
+func TestMultiCatalogInvalidCatalog(t *testing.T) {
+	salesCatalog := createSalesNamedCatalog()
+
+	server := newMultiCatalogTestServer(t, []catalog.Catalog{salesCatalog})
+	defer server.stop()
+
+	db := openDuckDB(t)
+	defer db.Close()
+
+	// ATTACH may or may not fail depending on DuckDB version — either is acceptable.
+	query := fmt.Sprintf("ATTACH 'nonexistent' AS bad_db (TYPE airport, LOCATION 'grpc://%s')", server.address)
+	_, attachErr := db.Exec(query)
+	if attachErr != nil {
+		t.Logf("ATTACH failed for non-existent catalog (expected): %v", attachErr)
+		return
+	}
+
+	// If ATTACH succeeded, querying should fail because the catalog doesn't exist on the server.
+	_, err := db.Query("SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'bad_db'")
+	if err == nil {
+		t.Fatal("Expected error when querying non-existent catalog, got nil")
+	}
+	t.Logf("Correctly failed to query non-existent catalog: %v", err)
 }

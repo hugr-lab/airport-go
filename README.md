@@ -24,7 +24,7 @@ A high-level Go package for building Apache Arrow Flight servers compatible with
 go get github.com/hugr-lab/airport-go@latest
 ```
 
-**Requirements**: Go 1.25+
+**Requirements**: Go 1.26+
 
 ## Quick Start
 
@@ -367,6 +367,8 @@ mcs.RemoveCatalog("inventory")
 Clients specify the target catalog via the `airport-catalog` gRPC metadata header.
 Requests without the header route to the default catalog (empty name).
 
+> **Note:** Multi-catalog support requires DuckDB 1.5+ with the Airport extension.
+
 For per-catalog authorization, implement `auth.CatalogAuthorizer`:
 
 ```go
@@ -426,7 +428,7 @@ record := builder.NewRecordBatch()
 
 ### Client-Side: DuckDB Setup
 
-**Important:** To query geometry data from DuckDB, you must install the spatial extension and register GeoArrow extensions:
+**Important:** To query geometry data from DuckDB, you must install the spatial extension:
 
 ```sql
 -- Install and load Airport extension
@@ -436,7 +438,10 @@ LOAD airport;
 -- REQUIRED for geometry support
 INSTALL spatial;
 LOAD spatial;
-FROM register_geoarrow_extensions();
+
+-- NOTE: DuckDB 1.4 requires manual GeoArrow registration:
+-- FROM register_geoarrow_extensions();
+-- DuckDB 1.5+ registers GeoArrow extensions automatically.
 
 -- Connect to your Flight server
 ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');

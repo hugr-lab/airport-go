@@ -4,8 +4,8 @@ This example demonstrates an Apache Arrow Flight server with geometry column sup
 
 ## Prerequisites
 
-- Go 1.25+
-- DuckDB 1.4+ (for client testing)
+- Go 1.26+
+- DuckDB 1.5+ (for client testing)
 - Airport extension for DuckDB
 - **Spatial extension for DuckDB** (required for geometry support)
 
@@ -64,7 +64,10 @@ LOAD airport;
 -- IMPORTANT: Required for geometry support
 INSTALL spatial;
 LOAD spatial;
-FROM register_geoarrow_extensions();
+
+-- NOTE: DuckDB 1.4 requires manual GeoArrow registration:
+-- FROM register_geoarrow_extensions();
+-- DuckDB 1.5+ registers GeoArrow extensions automatically.
 
 -- Connect to the local Airport server
 ATTACH '' AS demo (TYPE airport, LOCATION 'grpc://localhost:50051');
@@ -128,10 +131,12 @@ WKT output:
 
 ### GeoArrow Extension Registration
 
-The `register_geoarrow_extensions()` function is **required** to properly decode the `geoarrow.wkb` extension type. Without it, DuckDB will not recognize the geometry column format.
+DuckDB 1.5+ automatically registers the GeoArrow extension types when the spatial extension is loaded. No manual registration is needed.
+
+If you are using DuckDB 1.4, you must manually call `register_geoarrow_extensions()` after loading the spatial extension:
 
 ```sql
--- This MUST be called after loading the spatial extension
+-- Only required for DuckDB 1.4
 FROM register_geoarrow_extensions();
 ```
 
@@ -162,7 +167,7 @@ The `catalog.NewGeometryField()` function supports these geometry types:
 
 3. **IPC Transfer**: Geometries are serialized as WKB bytes in the Arrow IPC format with the `geoarrow.wkb` extension type metadata.
 
-4. **DuckDB Decoding**: The `register_geoarrow_extensions()` function registers a type handler that converts the `geoarrow.wkb` extension type to DuckDB's native GEOMETRY type.
+4. **DuckDB Decoding**: DuckDB's spatial extension (1.5+) automatically recognizes the `geoarrow.wkb` extension type and converts it to DuckDB's native GEOMETRY type.
 
 5. **Spatial Queries**: Once decoded, you can use all of DuckDB's spatial functions (ST_AsText, ST_Distance, ST_X, ST_Y, etc.).
 

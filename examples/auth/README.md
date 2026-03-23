@@ -4,8 +4,8 @@ This example demonstrates bearer token authentication with the Airport Go packag
 
 ## Prerequisites
 
-- Go 1.25+
-- DuckDB 1.4+ (for client testing)
+- Go 1.26+
+- DuckDB 1.5+ (for client testing)
 - Airport extension for DuckDB
 
 ## Installation

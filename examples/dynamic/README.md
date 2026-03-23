@@ -8,8 +8,8 @@ This example demonstrates a dynamic Airport Flight catalog with:
 
 ## Prerequisites
 
-- Go 1.25+
-- DuckDB 1.4+ (for client testing)
+- Go 1.26+
+- DuckDB 1.5+ (for client testing)
 - Airport extension for DuckDB
 
 ## Installation
