@@ -73,6 +73,15 @@ func RegisterFlightServer(grpcServer *grpc.Server, flightServer flight.FlightSer
 	flight.RegisterFlightServiceServer(grpcServer, flightServer)
 }
 
+// Handshake implements flight.FlightServer.
+// Overrides the default Unimplemented response so that clients which do call
+// Handshake get a proper response instead of an error.
+// Note: DuckDB Airport extension does not call Handshake — authentication is
+// enforced by the gRPC stream interceptor on every RPC call.
+func (s *Server) Handshake(stream flight.FlightService_HandshakeServer) error {
+	return nil
+}
+
 // CatalogName returns the name of the catalog if it implements NamedCatalog.
 // Returns empty string if the catalog has no name.
 func (s *Server) CatalogName() string {

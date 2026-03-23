@@ -163,6 +163,8 @@ ATTACH 'my_server' AS my_server (
 );
 ```
 
+> **Note:** DuckDB 1.5 does not send any RPC to the server during `ATTACH` with an invalid token — the `ATTACH` statement may succeed silently. Authentication is enforced on actual data access (queries, schema discovery), so all data remains protected. Invalid tokens will produce an error on the first query, not on `ATTACH`.
+
 Alternatively, for inline authentication headers:
 
 ```sql
