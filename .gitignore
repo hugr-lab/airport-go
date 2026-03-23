@@ -54,5 +54,8 @@ vendor/
 # Spec plans
 specs/
 
+# Posts / announcements
+posts/
+
 # OS-specific
 Thumbs.db
