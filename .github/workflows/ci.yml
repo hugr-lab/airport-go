@@ -21,20 +21,20 @@ jobs:
       - name: Lint main module
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6.2
+          version: v2.11.1
           args: --timeout=5m
 
       - name: Lint examples module
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6.2
+          version: v2.11.1
           args: --timeout=5m
           working-directory: examples
 
       - name: Lint tests module
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.6.2
+          version: v2.11.1
           args: --timeout=5m
           working-directory: tests
 
