@@ -216,6 +216,9 @@ func (s *Server) handleCreateSchemaAction(ctx context.Context, action *flight.Ac
 	if errors.Is(err, catalog.ErrAlreadyExists) {
 		return status.Errorf(codes.AlreadyExists, "schema %q already exists", params.Schema)
 	}
+	if errors.Is(err, catalog.ErrUnimplemented) {
+		return status.Errorf(codes.Unimplemented, "schema creation not supported by catalog")
+	}
 	if err != nil {
 		s.logger.Error("Failed to create schema", "schema", params.Schema, "error", err)
 		return status.Errorf(codes.Internal, "failed to create schema: %v", err)
@@ -291,6 +294,9 @@ func (s *Server) handleDropSchemaAction(ctx context.Context, action *flight.Acti
 	err := dynCat.DropSchema(ctx, schemaName, opts)
 	if errors.Is(err, catalog.ErrNotFound) {
 		return status.Errorf(codes.NotFound, "schema %q not found", schemaName)
+	}
+	if errors.Is(err, catalog.ErrUnimplemented) {
+		return status.Errorf(codes.Unimplemented, "schema deletion not supported by catalog")
 	}
 	if errors.Is(err, catalog.ErrSchemaNotEmpty) {
 		return status.Errorf(codes.FailedPrecondition, "schema %q contains tables", schemaName)

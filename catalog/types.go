@@ -8,6 +8,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
+var ErrUnimplemented = errors.New("unimplemented")
+
 // ErrNullRowID is returned when a null rowid value is encountered in UPDATE or DELETE operations.
 // Implementations of UpdatableBatchTable and DeletableBatchTable MUST return this error
 // when they encounter null values in the rowid column of the input Record.
